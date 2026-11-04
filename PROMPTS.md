@@ -94,3 +94,79 @@ publicly trusted certificate, so nothing else is needed. Local development witho
 say so explicitly with `sslmode=disable`. I found it while preparing the deployment config,
 reading the adapter line by line before pointing it at a real database.
 Commit: [2497d81](../../commit/2497d81).
+
+---
+
+## 4. 2026-11-04: Every audit entry recorded Render's load balancer as "who" (audit trail)
+
+**Asked:** "Prepare the app for Render: trust the proxy so `req.ip` is the real client."
+
+**Produced:** `app.set('trust proxy', 1)`, with the comment "Render puts one proxy in front of
+us". That is the standard snippet, and it passed every local test, because locally there is
+no proxy at all.
+
+**What was wrong:** After deploying I ran a black-box script against the live site. 30 of 32
+checks passed, but every refused attempt in the audit trail came "from" `10.31.76.3`, Render's
+internal load balancer. The brief says "you can prove who reached it", and an IP column where
+every row is identical proves nothing. The first fix (trust private ranges only) then recorded
+`104.23.160.28`, a Cloudflare edge address, so there are *two* proxy layers: client →
+Cloudflare → Render's private network → app. The AI's "one proxy" assumption was wrong twice.
+
+**What I did instead:** `trust proxy` now skips only private ranges plus Cloudflare's
+published ranges, so the first remaining address is the client. I proved it two ways: a
+local test where a client prepends a fake `X-Forwarded-For` entry and is still identified
+correctly, and a poll of the live audit trail until it recorded my real ISP address. A fixed
+hop count is fragile, and `trust proxy: true` would let anyone spoof their IP into the evidence
+log, so I rejected both. Commits: [63616f9](../../commit/63616f9),
+[b7b96a4](../../commit/b7b96a4).
+
+---
+
+## 5. 2026-11-04: OTP sign-in leaked which emails have accounts, and emailed strangers (authentication)
+
+**Asked:** "Add email one-time codes for sign-up, passwordless sign-in and password reset.
+Unknown emails must get the same response as known ones (no account enumeration)."
+
+**Produced:** `issueCode({ ..., send: deliverable(user) })` with `send = true` as a default
+parameter, and an early `if (!send) return { ticket }` placed *before* the rate-limit check.
+The response bodies for known and unknown emails were identical, as asked.
+
+**What was wrong (two bugs, found by one failing test):**
+1. *Enumeration through the rate limiter.* Only real sends counted toward the 60-second
+   cooldown. Ask for a code twice: a registered email answers `429` the second time, an
+   unregistered one answers `200` both times. Identical bodies, different behaviour.
+2. *Emailing addresses with no account.* `deliverable(undefined)` returns `undefined`, not
+   `false`, and a JavaScript default parameter replaces `undefined`, so `send = true` kicked
+   in. The server really did email codes to arbitrary addresses (useless codes, but a spam
+   relay). My first mutation test still "passed" with the leak re-introduced. That made no
+   sense, so I printed the actual statuses and found bug 2 hiding bug 1.
+
+**What I did instead:** limits and the stored row now apply identically whether or not we
+deliver. `deliverable()` returns a real boolean, and `issueCode` *throws* unless `send` is
+an explicit `true` or `false`; every call site states which. The test now replays
+"request twice" for a known and an unknown address on both endpoints and asserts identical
+`[status, keys, status]` sequences, *and* that the unknown address received nothing. Both
+bugs, re-introduced one at a time, now fail it. Commit: [55945f5](../../commit/55945f5).
+
+---
+
+## 6. 2026-11-04: A correct password could not sign in with SMS two-factor
+
+**Asked:** "Add SMS as a second factor, using the same rate-limited code engine."
+
+**Produced:** At sign-in, after the password, `issueCode('second_sms')`. If that threw, the
+whole login failed.
+
+**What was wrong:** It only showed up driving the real UI in a browser, not in API tests.
+Verifying a phone number sends a text. Turning on SMS two-factor and signing in within a
+minute meant the second-factor text hit the 60-second cooldown, so the person got "Please
+wait 55 seconds" *after typing the right password* and could not get in. In the same session
+the AI also made `channels()` report email as enabled in development without keeping the
+console fallback, so the dev server tried to call Brevo with no key (`401`).
+
+**What I did instead:** when the second-factor text is rate-limited, the second step opens
+anyway with `smsCooldown`, the screen says a code was sent moments ago, and the Resend
+button counts down. The limits themselves are unchanged. I added a regression test (phone
+verified → SMS 2FA on → immediate sign-in → still reaches the SMS step → resend → signed in).
+"Is a provider configured?" and "is this channel offered?" are now separate functions.
+Commit: [c4ebe16](../../commit/c4ebe16).
