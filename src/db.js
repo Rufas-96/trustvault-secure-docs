@@ -21,7 +21,9 @@ async function makePg() {
   const { default: pg } = await import('pg');
   const pool = new pg.Pool({
     connectionString: config.databaseUrl,
-    ssl: config.databaseUrl.includes('sslmode=disable') ? false : { rejectUnauthorized: false },
+    // Verify the database's TLS certificate. Turning verification off would let anyone on
+    // the network path impersonate the database and read every document and audit row.
+    ssl: config.databaseUrl.includes('sslmode=disable') ? false : { rejectUnauthorized: true },
     max: 5,
   });
   return {

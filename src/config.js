@@ -1,6 +1,6 @@
 // All configuration comes from environment variables. In production, missing secrets
 // stop the server from starting instead of silently falling back to weak defaults.
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
@@ -30,9 +30,13 @@ function secret(name) {
 }
 
 function key32(name) {
-  const buf = Buffer.from(secret(name), 'base64');
-  if (buf.length !== 32) throw new Error(`${name} must be 32 bytes, base64-encoded`);
-  return buf;
+  const raw = secret(name);
+  const buf = Buffer.from(raw, 'base64');
+  if (buf.length === 32) return buf;
+  // Hosts that generate secrets for you (Render's generateValue) give a random string, not
+  // necessarily 32 base64 bytes. Hash it down to 32 bytes, but refuse anything short.
+  if (raw.length < 32) throw new Error(`${name} must be at least 32 characters (or 32 bytes base64)`);
+  return createHash('sha256').update(raw).digest();
 }
 
 export const config = {

@@ -1,0 +1,24 @@
+# Render Blueprint: one free web service. The database is external (Neon Postgres);
+# paste its connection string as DATABASE_URL when Render asks for it.
+services:
+  - type: web
+    name: trustvault-secure-docs
+    runtime: node
+    plan: free
+    buildCommand: npm ci --omit=dev
+    startCommand: npm start
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: "24"
+      - key: DATABASE_URL
+        sync: false
+      # Generated once by Render and kept across deploys. Changing them later makes
+      # existing files undecryptable and the audit chain unverifiable, so never rotate
+      # them casually.
+      - key: FILE_ENCRYPTION_KEY
+        generateValue: true
+      - key: AUDIT_HMAC_KEY
+        generateValue: true
