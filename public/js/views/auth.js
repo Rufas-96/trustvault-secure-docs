@@ -1,4 +1,4 @@
-// Sign in (password, email code, mobile code), create account, verify email, forgot
+// Sign in (password or email code), create account, verify email, forgot
 // password, and the second-factor step. Every rule shown here is enforced again by the
 // server; the UI only explains it.
 import { h, icon, avatar, rolePill, toast } from '../ui.js';
@@ -94,7 +94,7 @@ function securityBadges() {
 // ── Page ─────────────────────────────────────────────────────────────────────
 export function renderAuthPage(root, { mode = 'signin', config, onSignedIn }) {
   const panel = h('div', { class: 'auth-panel' });
-  const channels = config?.channels || { email: false, sms: false };
+  const channels = config?.channels || { email: false };
 
   function show(view) {
     panel.replaceChildren(view);
@@ -122,10 +122,10 @@ export function renderAuthPage(root, { mode = 'signin', config, onSignedIn }) {
     const setMethod = (m) => {
       method = m;
       methods.replaceChildren(
-        ...[['password', 'Password', 'key'], ['email', 'Email code', 'info'], ['sms', 'Mobile', 'user']].map(([k, label, ic]) =>
+        ...[['password', 'Password', 'key'], ['email', 'Email code', 'info']].map(([k, label, ic]) =>
           h('button', { type: 'button', role: 'tab', class: k === method ? 'on' : '', 'aria-selected': String(k === method), onclick: () => setMethod(k) }, icon(ic), label)));
       hideError(error);
-      body.replaceChildren(method === 'password' ? passwordForm() : method === 'email' ? codeStartForm('email') : codeStartForm('sms'));
+      body.replaceChildren(method === 'password' ? passwordForm() : codeStartForm());
       body.querySelector('input')?.focus();
     };
 
@@ -157,36 +157,26 @@ export function renderAuthPage(root, { mode = 'signin', config, onSignedIn }) {
       return form;
     }
 
-    function codeStartForm(channel) {
-      const enabled = channels[channel];
-      if (!enabled) {
-        return h('div', { class: 'note' }, icon('info'), h('div', {},
-          channel === 'sms'
-            ? 'Sign-in by mobile number is built (verification codes by SMS, stored hashed, rate-limited, single use), but no SMS provider is configured on this deployment, so it is switched off rather than pretending to work.'
-            : 'Email sign-in codes are not enabled on this deployment.'));
-      }
-      const input = channel === 'email'
-        ? h('input', { class: 'input', type: 'email', autocomplete: 'username', required: true, placeholder: 'you@company.com' })
-        : h('input', { class: 'input', type: 'tel', autocomplete: 'tel', required: true, placeholder: '98765 43210' });
+    function codeStartForm() {
+      if (!channels.email) return h('div', { class: 'note' }, icon('info'), h('div', {}, 'Email sign-in codes are not enabled on this deployment.'));
+      const input = h('input', { class: 'input', type: 'email', autocomplete: 'username', required: true, placeholder: 'you@company.com' });
       const submit = h('button', { class: 'btn primary block', type: 'submit' }, icon('upload'), 'Send code');
       return h('form', { class: 'stack', onsubmit: async (e) => {
         e.preventDefault();
         hideError(error);
         submit.disabled = true;
         try {
-          const body = channel === 'email' ? { email: input.value } : { phone: input.value };
-          const r = await post(`/auth/${channel === 'email' ? 'email-code' : 'sms-code'}/start`, body);
-          show(codeEntryView({ channel, ticket: r.ticket, sentTo: r.sentTo, resend: () => post(`/auth/${channel === 'email' ? 'email-code' : 'sms-code'}/start`, body) }));
+          const body = { email: input.value };
+          const r = await post('/auth/email-code/start', body);
+          show(codeEntryView({ ticket: r.ticket, sentTo: r.sentTo, resend: () => post('/auth/email-code/start', body) }));
         } catch (err) {
           showError(error, err);
         } finally {
           submit.disabled = false;
         }
       } },
-      h('label', { class: 'field' }, channel === 'email' ? 'Email' : 'Mobile number', input),
-      h('p', { class: 'muted small' }, channel === 'email'
-        ? 'We email a 6-digit code that works once, for 10 minutes. No password needed; if you use an authenticator app it is still required.'
-        : 'We text a 6-digit code to your verified number. For your safety you will then be asked for your password too.'),
+      h('label', { class: 'field' }, 'Email', input),
+      h('p', { class: 'muted small' }, 'We email a 6-digit code that works once, for 10 minutes. No password needed; if you use an authenticator app it is still required.'),
       submit);
     }
 
@@ -198,7 +188,7 @@ export function renderAuthPage(root, { mode = 'signin', config, onSignedIn }) {
   }
 
   // ── Code entry for passwordless sign-in ──
-  function codeEntryView({ channel, ticket, sentTo, resend }) {
+  function codeEntryView({ ticket, sentTo, resend }) {
     const error = errorBox();
     const code = codeInput();
     const submit = h('button', { class: 'btn primary block', type: 'submit' }, 'Verify and sign in');
@@ -207,64 +197,45 @@ export function renderAuthPage(root, { mode = 'signin', config, onSignedIn }) {
       hideError(error);
       submit.disabled = true;
       try {
-        afterFirst(await post(`/auth/${channel === 'email' ? 'email-code' : 'sms-code'}/verify`, { ticket, code: code.value }));
+        afterFirst(await post('/auth/email-code/verify', { ticket, code: code.value }));
       } catch (err) {
         showError(error, err);
       } finally {
         submit.disabled = false;
       }
     } },
-    h('div', { class: 'mfa-badge' }, icon(channel === 'email' ? 'info' : 'user')),
-    h('div', {}, h('h2', {}, channel === 'email' ? 'Check your email' : 'Check your phone'),
+    h('div', { class: 'mfa-badge' }, icon('info')),
+    h('div', {}, h('h2', {}, 'Check your email'),
       h('p', { class: 'muted' }, `If an account matches, we sent a 6-digit code to ${sentTo}. It expires in 10 minutes and works once.`)),
     error, h('label', { class: 'field' }, '6-digit code', code), submit,
     h('div', { class: 'row wrap' }, resendButton(async () => { ticket = (await resend()).ticket; }),
-      h('button', { type: 'button', class: 'btn ghost sm', onclick: () => show(signInView(channel)) }, 'Use a different address')));
+      h('button', { type: 'button', class: 'btn ghost sm', onclick: () => show(signInView('email')) }, 'Use a different address')));
   }
 
   // ── Second factor ──
   function secondStepView(r) {
     const error = errorBox();
     const mfaToken = r.mfaToken;
-    let smsTicket = r.smsTicket;
     let useRecovery = false;
-    const isPassword = r.method === 'password';
-    const input = isPassword ? h('input', { class: 'input', type: 'password', autocomplete: 'current-password', 'aria-label': 'Password' }) : codeInput();
-    const label = h('span', {}, isPassword ? 'Your password' : r.method === 'sms' ? `Code sent by SMS to ${r.sentTo}` : '6-digit code from your authenticator app');
+    const input = codeInput();
+    const label = h('span', {}, '6-digit code from your authenticator app');
     const submit = h('button', { class: 'btn primary block', type: 'submit' }, 'Verify');
-    const extras = h('div', { class: 'row wrap' });
-    if (r.method === 'totp') {
-      const toggle = h('button', { type: 'button', class: 'btn ghost sm', onclick: () => {
-        useRecovery = !useRecovery;
-        label.textContent = useRecovery ? 'Recovery code (e.g. 7KQ4-M2XD)' : '6-digit code from your authenticator app';
-        input.setAttribute('inputmode', useRecovery ? 'text' : 'numeric');
-        input.setAttribute('maxlength', useRecovery ? '9' : '7');
-        input.setAttribute('placeholder', useRecovery ? 'XXXX-XXXX' : '123 456');
-        toggle.textContent = useRecovery ? 'Use authenticator code instead' : 'Lost your phone? Use a recovery code';
-        input.value = '';
-        input.focus();
-      } }, 'Lost your phone? Use a recovery code');
-      extras.append(toggle);
-    }
-    if (r.method === 'sms') extras.append(resendButton(async () => { smsTicket = (await post('/auth/mfa/resend-sms', { mfaToken })).smsTicket; }, r.smsCooldown ?? 60));
-    if (r.method === 'sms' && r.smsCooldown) label.textContent = `A code was texted to ${r.sentTo} moments ago. Wait ${r.smsCooldown}s, then press Resend for a fresh one.`;
-    extras.append(h('button', { type: 'button', class: 'btn ghost sm', onclick: () => show(signInView()) }, 'Start over'));
-
-    const titles = { totp: 'Two-factor sign-in', sms: 'Two-factor sign-in', password: 'Confirm it is you' };
-    const subs = {
-      totp: 'First step done. Enter the code from your authenticator app to finish signing in.',
-      sms: 'First step done. Enter the code we just texted you.',
-      password: 'Your mobile code was correct. Enter your password as the second factor.',
-    };
+    const toggle = h('button', { type: 'button', class: 'btn ghost sm', onclick: () => {
+      useRecovery = !useRecovery;
+      label.textContent = useRecovery ? 'Recovery code (e.g. 7KQ4-M2XD)' : '6-digit code from your authenticator app';
+      input.setAttribute('inputmode', useRecovery ? 'text' : 'numeric');
+      input.setAttribute('maxlength', useRecovery ? '9' : '7');
+      input.setAttribute('placeholder', useRecovery ? 'XXXX-XXXX' : '123 456');
+      toggle.textContent = useRecovery ? 'Use authenticator code instead' : 'Lost your phone? Use a recovery code';
+      input.value = '';
+      input.focus();
+    } }, 'Lost your phone? Use a recovery code');
     return h('form', { class: 'stack', onsubmit: async (e) => {
       e.preventDefault();
       hideError(error);
       submit.disabled = true;
       try {
-        const body = isPassword ? { mfaToken, password: input.value }
-          : r.method === 'sms' ? { mfaToken, smsTicket, code: input.value }
-          : useRecovery ? { mfaToken, recoveryCode: input.value } : { mfaToken, code: input.value.replace(/\s/g, '') };
-        onSignedIn(await post('/auth/mfa', body));
+        onSignedIn(await post('/auth/mfa', useRecovery ? { mfaToken, recoveryCode: input.value } : { mfaToken, code: input.value.replace(/\s/g, '') }));
       } catch (err) {
         showError(error, err);
         if (/again/i.test(err.message)) setTimeout(() => show(signInView()), 1800);
@@ -273,8 +244,9 @@ export function renderAuthPage(root, { mode = 'signin', config, onSignedIn }) {
       }
     } },
     h('div', { class: 'mfa-badge' }, icon('shield')),
-    h('div', {}, h('h2', {}, titles[r.method]), h('p', { class: 'muted' }, subs[r.method])),
-    error, h('label', { class: 'field' }, label, input), submit, extras);
+    h('div', {}, h('h2', {}, 'Two-factor sign-in'), h('p', { class: 'muted' }, 'First step done. Enter the code from your authenticator app to finish signing in.')),
+    error, h('label', { class: 'field' }, label, input), submit,
+    h('div', { class: 'row wrap' }, toggle, h('button', { type: 'button', class: 'btn ghost sm', onclick: () => show(signInView()) }, 'Start over')));
   }
 
   // ── Create account ──
@@ -287,7 +259,6 @@ export function renderAuthPage(root, { mode = 'signin', config, onSignedIn }) {
     const error = errorBox();
     const name = h('input', { class: 'input', autocomplete: 'name', required: true, maxlength: '100', placeholder: 'Priya Shah' });
     const email = h('input', { class: 'input', type: 'email', autocomplete: 'email', required: true, placeholder: 'you@company.com' });
-    const phone = h('input', { class: 'input', type: 'tel', autocomplete: 'tel', placeholder: '98765 43210 (optional)' });
     const password = h('input', { class: 'input', type: 'password', autocomplete: 'new-password', required: true, minlength: String(config?.passwordMinLength || 12) });
     const confirm = h('input', { class: 'input', type: 'password', autocomplete: 'new-password', required: true });
     const submit = h('button', { class: 'btn primary block', type: 'submit' }, icon('user'), 'Create account');
@@ -297,7 +268,7 @@ export function renderAuthPage(root, { mode = 'signin', config, onSignedIn }) {
       if (password.value !== confirm.value) return showError(error, new Error('The passwords do not match'));
       submit.disabled = true;
       try {
-        const r = await post('/auth/signup', { name: name.value, email: email.value, password: password.value, phone: phone.value || undefined });
+        const r = await post('/auth/signup', { name: name.value, email: email.value, password: password.value });
         show(verifyEmailView(email.value, r.ticket, r.sentTo));
       } catch (err) {
         showError(error, err);
@@ -310,7 +281,6 @@ export function renderAuthPage(root, { mode = 'signin', config, onSignedIn }) {
     error,
     h('label', { class: 'field' }, 'Full name', name),
     h('label', { class: 'field' }, 'Work email', email),
-    h('label', { class: 'field' }, 'Mobile number', phone),
     h('label', { class: 'field' }, 'Password', password),
     strengthMeter(password, () => ({ email: email.value, name: name.value })),
     h('label', { class: 'field' }, 'Confirm password', confirm),
@@ -407,7 +377,7 @@ export function renderAuthPage(root, { mode = 'signin', config, onSignedIn }) {
         securityBadges()),
       h('div', { class: 'pillars' },
         pillar('lock', 'Only named people', 'Access is granted per document, to a person, with read or edit, and an optional expiry.'),
-        pillar('shield', 'Strong sign-in', 'Verified email, one-time codes, authenticator apps or SMS as a second factor, and rate limits on every guess.'),
+        pillar('shield', 'Strong sign-in', 'Verified email, one-time codes, authenticator apps as a second factor, and rate limits on every guess.'),
         pillar('history', 'Evidence, not logs', 'An append-only, HMAC-chained audit trail. Any edit or deletion is detected.')),
       h('div', { class: 'foot' }, 'TrustVault · RISE hiring challenge 2026')),
     h('section', { class: 'login-form-wrap' }, h('div', { class: 'login-form' }, panel))));

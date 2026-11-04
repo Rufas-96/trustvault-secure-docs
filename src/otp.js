@@ -1,4 +1,4 @@
-// One-time codes for email and SMS. The single place codes are created and checked.
+// One-time email codes. The single place codes are created and checked.
 //
 //   - 6 random digits from crypto.randomInt (not Math.random)
 //   - stored as HMAC(server key, id:code), never in plain text
@@ -11,7 +11,7 @@ import { config } from './config.js';
 import { query } from './db.js';
 import { randomToken, safeEqual, sha256Hex } from './crypto.js';
 import { HttpError } from './http.js';
-import { codeEmail, codeSms, sendEmail, sendSms } from './notify.js';
+import { codeEmail, sendEmail } from './notify.js';
 
 export const CODE_MINUTES = 10;
 const MAX_ATTEMPTS = 5;
@@ -72,12 +72,12 @@ export async function issueCode({ purpose, channel, destination, userId = null, 
   // never be verified. It exists purely so timing and limits look identical.
   if (!send) return { ticket };
   try {
-    if (channel === 'email') await sendEmail({ to: destination, ...codeEmail(purpose, code, CODE_MINUTES) });
-    else await sendSms({ to: destination, text: codeSms(purpose, code, CODE_MINUTES) });
+    if (channel !== 'email') throw new Error(`Unsupported channel: ${channel}`);
+    await sendEmail({ to: destination, ...codeEmail(purpose, code, CODE_MINUTES) });
   } catch (err) {
     console.error('code delivery failed:', err.message);
     await query('UPDATE otp_codes SET consumed_at = now() WHERE id = $1', [id]);
-    throw new HttpError(502, `We could not send the ${channel === 'email' ? 'email' : 'text message'} right now. Try again in a minute.`);
+    throw new HttpError(502, 'We could not send the email right now. Try again in a minute.');
   }
   return { ticket };
 }
@@ -110,17 +110,6 @@ export async function verifyCode({ ticket, code, purpose }) {
   return row;
 }
 
-/** Normalise an Indian or international mobile number to E.164, or throw 400. */
-export function normalisePhone(input) {
-  if (typeof input !== 'string') throw new HttpError(400, 'Enter a mobile number');
-  let p = input.replace(/[\s\-().]/g, '');
-  if (/^0\d{10}$/.test(p)) p = p.slice(1);
-  if (/^[6-9]\d{9}$/.test(p)) p = `+91${p}`; // 10-digit Indian mobile
-  if (!/^\+[1-9]\d{7,14}$/.test(p)) throw new HttpError(400, 'Enter a valid mobile number, e.g. 98765 43210 or +919876543210');
-  return p;
-}
-
-export const maskPhone = (p) => (p ? `${p.slice(0, 3)} ••••• ${p.slice(-3)}` : null);
 export const maskEmail = (e) => {
   const [local, domain] = String(e).split('@');
   return `${local.slice(0, 2)}${'•'.repeat(Math.max(1, local.length - 2))}@${domain}`;

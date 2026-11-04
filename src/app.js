@@ -5,7 +5,7 @@ import express from 'express';
 import multer from 'multer';
 import { config } from './config.js';
 import { audit } from './audit.js';
-import { accountRouter, loadSession, login, loginMfa, logout, publicAuthRouter, publicUser, requireAccountReady, requireAuth, requireCsrf, requireSameOrigin, resendSecondSms } from './auth.js';
+import { accountRouter, loadSession, login, loginMfa, logout, publicAuthRouter, publicUser, requireAccountReady, requireAuth, requireCsrf, requireSameOrigin } from './auth.js';
 import { channels } from './notify.js';
 import { MIN_LENGTH } from './passwords.js';
 import { HttpError } from './http.js';
@@ -73,12 +73,11 @@ export function createApp() {
   api.use(requireCsrf);
 
   // `channels` tells the UI which code deliveries really work here, so it never offers one
-  // that does not (e.g. SMS without a configured provider).
+  // that does not (e.g. email without a configured provider).
   api.get('/config', (req, res) => res.json({ categories: CATEGORIES, allowedExtensions: ALLOWED_EXTENSIONS, maxUploadBytes: config.maxUploadBytes, passwordMinLength: MIN_LENGTH, channels: channels() }));
   api.post('/auth/login', login);
   api.post('/auth/mfa', loginMfa);
-  api.post('/auth/mfa/resend-sms', resendSecondSms);
-  api.use('/auth', publicAuthRouter); // sign-up, email/SMS code sign-in, password reset
+  api.use('/auth', publicAuthRouter); // sign-up, email-code sign-in, password reset
   api.post('/auth/logout', requireAuth, logout);
   api.get('/me', requireAuth, (req, res) => res.json({ user: publicUser(req.user), csrfToken: req.csrfToken }));
   // Same as /me, but 200 with user:null when signed out, so the page can boot without a 401.

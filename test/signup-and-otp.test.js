@@ -1,4 +1,4 @@
-// Self sign-up, email/SMS one-time codes, password reset, phone numbers and SMS two-factor.
+// Self sign-up, email one-time codes and password reset.
 import { after, before, beforeEach, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
@@ -62,7 +62,6 @@ describe('O-01 self sign-up with email verification', () => {
     const c = new Client();
     assert.equal((await c.post('/api/auth/signup', { json: { name: 'Weak', email, password: 'password123' } })).status, 400);
     assert.equal((await c.post('/api/auth/signup', { json: { name: 'Bad', email: 'not-an-email', password: PASSWORD } })).status, 400);
-    assert.equal((await c.post('/api/auth/signup', { json: { name: 'Bad Phone', email, password: PASSWORD, phone: '12' } })).status, 400);
     const [{ n }] = await query('SELECT count(*)::int AS n FROM users WHERE email = $1', [email]);
     assert.equal(n, 0);
   });
@@ -219,78 +218,6 @@ describe('O-07 forgotten password', () => {
     assert.equal((await new Client().post('/api/auth/login', { json: { email, password: PASSWORD } })).status, 401, 'old password retired');
     const r = await new Client().post('/api/auth/login', { json: { email, password: 'Brand-New-Monsoon-Pass-9' } });
     assert.equal(r.data.mfaRequired, true, 'reset does not bypass the authenticator');
-  });
-});
-
-describe('O-08 mobile number and SMS', () => {
-  test('verify a phone, turn on SMS 2FA, sign in with password + SMS, and with SMS + password', async () => {
-    const email = uniq('phone');
-    const phone = `+9198${String(Date.now()).slice(-8)}`;
-    const c = await signUp(email);
-    const p = await c.post('/api/auth/phone/start', { json: { phone } });
-    assert.equal(p.status, 200, JSON.stringify(p.data));
-    assert.equal((await c.post('/api/auth/phone/verify', { json: { ticket: p.data.ticket, code: lastCodeFor(phone) } })).status, 200);
-    assert.equal((await c.post('/api/auth/sms-2fa', { json: { enabled: true, password: 'wrong' } })).status, 400, 'needs the password');
-    assert.equal((await c.post('/api/auth/sms-2fa', { json: { enabled: true, password: PASSWORD } })).status, 200);
-
-    // Password first, SMS second.
-    await ageCodes();
-    const l = new Client();
-    const step1 = await l.post('/api/auth/login', { json: { email, password: PASSWORD } });
-    assert.equal(step1.data.method, 'sms');
-    assert.equal((await l.post('/api/auth/mfa', { json: { mfaToken: step1.data.mfaToken, smsTicket: step1.data.smsTicket, code: '000001' } })).status, 401);
-    const step2 = await l.post('/api/auth/mfa', { json: { mfaToken: step1.data.mfaToken, smsTicket: step1.data.smsTicket, code: lastCodeFor(phone) } });
-    assert.equal(step2.status, 200);
-
-    // SMS first: the second factor becomes the password, never SMS twice.
-    await ageCodes();
-    const m = new Client();
-    const s = await m.post('/api/auth/sms-code/start', { json: { phone: phone.replace('+91', '') } });
-    const v = await m.post('/api/auth/sms-code/verify', { json: { ticket: s.data.ticket, code: lastCodeFor(phone) } });
-    assert.equal(v.data.method, 'password');
-    assert.equal((await m.post('/api/auth/mfa', { json: { mfaToken: v.data.mfaToken, password: PASSWORD } })).status, 200);
-  });
-
-  test('signing in right after a text was sent opens the SMS step (with a cooldown), instead of locking the person out', async () => {
-    const email = uniq('quick');
-    const phone = `+9195${String(Date.now()).slice(-8)}`;
-    const c = await signUp(email);
-    const p = await c.post('/api/auth/phone/start', { json: { phone } });
-    await c.post('/api/auth/phone/verify', { json: { ticket: p.data.ticket, code: lastCodeFor(phone) } });
-    await c.post('/api/auth/sms-2fa', { json: { enabled: true, password: PASSWORD } });
-    // No ageing: the phone-verification text was sent seconds ago.
-    const l = new Client();
-    const r = await l.post('/api/auth/login', { json: { email, password: PASSWORD } });
-    assert.equal(r.status, 200, `correct password must not be refused: ${JSON.stringify(r.data)}`);
-    assert.equal(r.data.method, 'sms');
-    assert.ok(r.data.smsCooldown > 0);
-    await ageCodes();
-    const again = await l.post('/api/auth/mfa/resend-sms', { json: { mfaToken: r.data.mfaToken } });
-    assert.equal(again.status, 200);
-    const done = await l.post('/api/auth/mfa', { json: { mfaToken: r.data.mfaToken, smsTicket: again.data.smsTicket, code: lastCodeFor(phone) } });
-    assert.equal(done.status, 200);
-  });
-
-  test('a verified number cannot be claimed by a second account', async () => {
-    const phone = `+9197${String(Date.now()).slice(-8)}`;
-    const a = await signUp(uniq('pa'));
-    const pa = await a.post('/api/auth/phone/start', { json: { phone } });
-    await a.post('/api/auth/phone/verify', { json: { ticket: pa.data.ticket, code: lastCodeFor(phone) } });
-    const b = await signUp(uniq('pb'));
-    assert.equal((await b.post('/api/auth/phone/start', { json: { phone } })).status, 409);
-  });
-
-  test("a phone code issued to one account cannot verify another account's phone", async () => {
-    const phone = `+9196${String(Date.now()).slice(-8)}`;
-    const a = await signUp(uniq('ca'));
-    const pa = await a.post('/api/auth/phone/start', { json: { phone } });
-    const b = await signUp(uniq('cb'));
-    assert.equal((await b.post('/api/auth/phone/verify', { json: { ticket: pa.data.ticket, code: lastCodeFor(phone) } })).status, 400);
-  });
-
-  test('demo accounts cannot add phones; anonymous users cannot reach account routes', async () => {
-    assert.equal((await (await as('vik')).post('/api/auth/phone/start', { json: { phone: '+919876543210' } })).status, 400);
-    assert.equal((await new Client().get('/api/auth/activity')).status, 401);
   });
 });
 

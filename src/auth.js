@@ -1,11 +1,10 @@
-// Authentication: passwords, email/SMS one-time codes, two-factor (TOTP or SMS), self
-// sign-up with email verification, password reset, server-side sessions, CSRF and Origin
-// checks, throttling, and account security settings.
+// Authentication: passwords, email one-time codes, two-factor (authenticator app / TOTP),
+// self sign-up with email verification, password reset, server-side sessions, CSRF and
+// Origin checks, throttling, and account security settings.
 //
 // Sign-in always has the same shape:
-//   factor 1  = password | email code | SMS code
-//   factor 2  = decided by secondFactorFor(): authenticator (TOTP), SMS code, or (when the
-//               SMS code was factor 1) the password. Never the same factor twice.
+//   factor 1  = password | email code
+//   factor 2  = authenticator code (or a recovery code), when the account has one
 //   session   = created only after every required factor is proven.
 import { Router } from 'express';
 import { config } from './config.js';
@@ -15,7 +14,7 @@ import { DUMMY_PASSWORD_HASH, hashPassword, randomToken, safeEqual, sha256Hex, v
 import { HttpError, isUuid, str } from './http.js';
 import { assertStrongPassword, passwordProblem } from './passwords.js';
 import { hashRecoveryCode, newRecoveryCodes, newSecret, openSecret, otpauthUri, sealSecret, verifyTotp } from './mfa.js';
-import { issueCode, maskEmail, maskPhone, normalisePhone, verifyCode } from './otp.js';
+import { issueCode, maskEmail, verifyCode } from './otp.js';
 import { channels } from './notify.js';
 
 export const SESSION_COOKIE = config.isProduction ? '__Host-tv_session' : 'tv_session';
@@ -51,17 +50,13 @@ export function publicUser(u) {
     id: u.id, email: u.email, name: u.name, role: u.role, department: u.department,
     mfaEnabled: Boolean(u.mfa_enabled), mustChangePassword: Boolean(u.must_change_password),
     mfaRequired: mfaMandatory(u), isDemo: Boolean(u.is_demo),
-    emailVerified: Boolean(u.email_verified), phone: maskPhone(u.phone && u.phone_verified ? u.phone : null),
-    phoneVerified: Boolean(u.phone_verified), sms2fa: Boolean(u.sms_2fa && u.phone_verified),
-    signupSource: u.signup_source, passwordChangedAt: u.password_changed_at,
+    emailVerified: Boolean(u.email_verified), signupSource: u.signup_source, passwordChangedAt: u.password_changed_at,
   };
 }
 
 /** Which second factor this user needs after `factor1`, or null for none. */
-export function secondFactorFor(user, factor1) {
-  if (user.mfa_enabled) return 'totp';
-  if (user.sms_2fa && user.phone_verified) return factor1 === 'sms' ? 'password' : 'sms';
-  return null;
+export function secondFactorFor(user) {
+  return user.mfa_enabled ? 'totp' : null;
 }
 
 // ── Throttling ───────────────────────────────────────────────────────────────
@@ -127,27 +122,14 @@ async function afterFirstFactor(req, res, user, factor1) {
   if (!second) return completeLogin(req, res, user, [factor1]);
 
   const ticket = randomToken(32);
-  let smsTicket = null;
-  let smsCooldown;
-  if (second === 'sms') {
-    try {
-      ({ ticket: smsTicket } = await issueCode({ purpose: 'second_sms', channel: 'sms', destination: user.phone, userId: user.id, ip: req.ip, send: true }));
-    } catch (err) {
-      // A text was sent moments ago (e.g. while verifying the number). Do not lock the person
-      // out after a correct first factor: open the second step anyway and let them press
-      // "Resend" once the cooldown ends. The limits themselves still hold.
-      if (err.status !== 429) throw err;
-      smsCooldown = err.details?.retryAfter ?? 60;
-    }
-  }
   await query('DELETE FROM pending_logins WHERE user_id = $1 OR expires_at < now()', [user.id]);
   await query(
     `INSERT INTO pending_logins (token_hash, user_id, expires_at, ip, factor1, second, otp_ticket_hash)
-     VALUES ($1,$2,now() + $3 * interval '1 minute',$4,$5,$6,$7)`,
-    [sha256Hex(ticket), user.id, PENDING_LOGIN_MINUTES, req.ip, factor1, second, smsTicket ? sha256Hex(smsTicket) : null],
+     VALUES ($1,$2,now() + $3 * interval '1 minute',$4,$5,$6,NULL)`,
+    [sha256Hex(ticket), user.id, PENDING_LOGIN_MINUTES, req.ip, factor1, second],
   );
   await audit({ actor: user, action: 'auth.first_factor', outcome: 'ok', details: { factor: factor1, next: second }, ip: req.ip });
-  res.json({ mfaRequired: true, mfaToken: ticket, method: second, smsTicket, smsCooldown, sentTo: second === 'sms' ? maskPhone(user.phone) : undefined });
+  res.json({ mfaRequired: true, mfaToken: ticket, method: second });
 }
 
 // ── Factor 1: password ───────────────────────────────────────────────────────
@@ -219,19 +201,6 @@ export async function loginMfa(req, res) {
       );
       if (used.length) method = 'recovery_code';
     }
-  } else if (pending.second === 'sms') {
-    const smsTicket = typeof body.smsTicket === 'string' ? body.smsTicket : '';
-    // The SMS code must belong to THIS pending sign-in, not to some other request.
-    if (smsTicket && pending.otp_ticket_hash && safeEqual(sha256Hex(smsTicket), pending.otp_ticket_hash)) {
-      try {
-        await verifyCode({ ticket: smsTicket, code: String(body.code ?? ''), purpose: 'second_sms' });
-        method = 'sms';
-      } catch {
-        /* counted below */
-      }
-    }
-  } else if (pending.second === 'password') {
-    if (await verifyPassword(String(body.password ?? '').slice(0, 200), pending.password_hash)) method = 'password';
   }
 
   if (!method) {
@@ -239,25 +208,12 @@ export async function loginMfa(req, res) {
     if (n >= MAX_SECOND_FACTOR_ATTEMPTS) await query('DELETE FROM pending_logins WHERE token_hash = $1', [pending.token_hash]);
     else await query('UPDATE pending_logins SET attempts = $2 WHERE token_hash = $1', [pending.token_hash, n]);
     await audit({ actor: pending, action: 'auth.second_factor', outcome: 'denied', details: { method: pending.second, attempt: n }, ip: req.ip });
-    throw new HttpError(401, n >= MAX_SECOND_FACTOR_ATTEMPTS ? 'Too many wrong attempts. Sign in again.' : pending.second === 'password' ? 'Password is not correct' : 'That code is not valid');
+    throw new HttpError(401, n >= MAX_SECOND_FACTOR_ATTEMPTS ? 'Too many wrong attempts. Sign in again.' : 'That code is not valid');
   }
 
   await query('DELETE FROM pending_logins WHERE token_hash = $1', [pending.token_hash]);
   const { token_hash, attempts: _a, factor1, second, otp_ticket_hash, ...user } = pending;
   return completeLogin(req, res, user, [factor1, method]);
-}
-
-export async function resendSecondSms(req, res) {
-  const ticket = typeof req.body?.mfaToken === 'string' ? req.body.mfaToken : '';
-  const [pending] = await query(
-    `SELECT p.token_hash, p.second, u.id, u.phone FROM pending_logins p JOIN users u ON u.id = p.user_id
-      WHERE p.token_hash = $1 AND p.expires_at > now()`,
-    [sha256Hex(ticket)],
-  );
-  if (!pending || pending.second !== 'sms') throw new HttpError(401, 'Sign-in expired. Start again.');
-  const { ticket: smsTicket } = await issueCode({ purpose: 'second_sms', channel: 'sms', destination: pending.phone, userId: pending.id, ip: req.ip, send: true });
-  await query('UPDATE pending_logins SET otp_ticket_hash = $2 WHERE token_hash = $1', [pending.token_hash, sha256Hex(smsTicket)]);
-  res.json({ smsTicket, sentTo: maskPhone(pending.phone) });
 }
 
 export async function logout(req, res) {
@@ -284,8 +240,6 @@ publicAuthRouter.post('/signup', async (req, res) => {
   if (!validEmail(email)) throw new HttpError(400, 'Enter a valid email address');
   const password = typeof req.body?.password === 'string' ? req.body.password : '';
   assertStrongPassword(password, { email, name });
-  let phone = null;
-  if (req.body?.phone) phone = normalisePhone(req.body.phone);
   hit(signupKey);
 
   const [existing] = await query('SELECT * FROM users WHERE email = $1', [email]);
@@ -302,17 +256,17 @@ publicAuthRouter.post('/signup', async (req, res) => {
     // An unverified self sign-up: whoever proves the inbox owns the account. Replacing the
     // password here stops an attacker "pre-registering" someone else's email.
     userId = existing.id;
-    await query('UPDATE users SET name = $2, password_hash = $3, phone = $4, phone_verified = false WHERE id = $1', [userId, name, hash, phone]);
+    await query('UPDATE users SET name = $2, password_hash = $3 WHERE id = $1', [userId, name, hash]);
   } else {
     const { randomUUID } = await import('node:crypto');
     userId = randomUUID();
     await query(
-      `INSERT INTO users (id, email, name, role, department, password_hash, email_verified, signup_source, phone)
-       VALUES ($1,$2,$3,'viewer',NULL,$4,false,'self',$5)`,
-      [userId, email, name, hash, phone],
+      `INSERT INTO users (id, email, name, role, department, password_hash, email_verified, signup_source)
+       VALUES ($1,$2,$3,'viewer',NULL,$4,false,'self')`,
+      [userId, email, name, hash],
     );
   }
-  await audit({ actorEmail: email, action: 'auth.signup', outcome: 'ok', targetUserId: userId, details: { role: 'viewer', phoneGiven: Boolean(phone) }, ip: req.ip });
+  await audit({ actorEmail: email, action: 'auth.signup', outcome: 'ok', targetUserId: userId, details: { role: 'viewer' }, ip: req.ip });
   const { ticket } = await issueCode({ purpose: 'signup', channel: 'email', destination: email, userId, ip: req.ip, send: true });
   res.status(201).json({ ticket, sentTo: maskEmail(email) });
 });
@@ -354,27 +308,6 @@ publicAuthRouter.post('/email-code/verify', async (req, res) => {
   const [user] = await query('SELECT * FROM users WHERE id = $1 AND email = $2', [row.user_id, row.destination]);
   if (!deliverable(user)) throw new HttpError(400, 'That code is not valid or has expired. Request a new one.');
   return afterFirstFactor(req, res, user, 'email');
-});
-
-publicAuthRouter.post('/sms-code/start', async (req, res) => {
-  if (!channels().sms) throw new HttpError(503, 'SMS sign-in is not enabled on this deployment', { code: 'SMS_DISABLED' });
-  const phone = normalisePhone(req.body?.phone);
-  const [user] = await query('SELECT * FROM users WHERE phone = $1 AND phone_verified', [phone]);
-  const { ticket } = await issueCode({ purpose: 'login_sms', channel: 'sms', destination: phone, userId: user?.id, ip: req.ip, send: Boolean(user && user.is_active && !user.is_demo) });
-  res.json({ ticket, sentTo: maskPhone(phone) });
-});
-
-publicAuthRouter.post('/sms-code/verify', async (req, res) => {
-  let row;
-  try {
-    row = await verifyCode({ ticket: req.body?.ticket, code: String(req.body?.code ?? ''), purpose: 'login_sms' });
-  } catch (err) {
-    await audit({ action: 'auth.login', outcome: 'denied', details: { factor: 'sms', reason: 'bad code' }, ip: req.ip });
-    throw err;
-  }
-  const [user] = await query('SELECT * FROM users WHERE id = $1 AND phone = $2 AND phone_verified', [row.user_id, row.destination]);
-  if (!user || !user.is_active) throw new HttpError(400, 'That code is not valid or has expired. Request a new one.');
-  return afterFirstFactor(req, res, user, 'sms');
 });
 
 publicAuthRouter.post('/password-reset/start', async (req, res) => {
@@ -494,7 +427,7 @@ export function requireSameOrigin(req, res, next) {
 // ── Account routes: /api/auth/* for the signed-in user ───────────────────────
 export const accountRouter = Router();
 
-const DEMO_LOCKED = 'The published demo accounts are shared by evaluators, so their password, phone and two-factor settings cannot be changed. Create your own account (Sign up) and try it there.';
+const DEMO_LOCKED = 'The published demo accounts are shared by evaluators, so their password and two-factor settings cannot be changed. Create your own account (Sign up) and try it there.';
 
 accountRouter.post('/password', async (req, res) => {
   if (req.user.is_demo) throw new HttpError(400, DEMO_LOCKED);
@@ -606,57 +539,4 @@ accountRouter.post('/mfa/disable', async (req, res) => {
 accountRouter.get('/mfa/recovery-codes', async (req, res) => {
   const [r] = await query('SELECT count(*)::int AS n FROM mfa_recovery_codes WHERE user_id = $1 AND used_at IS NULL', [req.user.id]);
   res.json({ remaining: r.n });
-});
-
-// ── Mobile number and SMS two-factor ──
-accountRouter.post('/phone/start', async (req, res) => {
-  if (req.user.is_demo) throw new HttpError(400, DEMO_LOCKED);
-  if (!channels().sms) throw new HttpError(503, 'SMS is not enabled on this deployment', { code: 'SMS_DISABLED' });
-  const phone = normalisePhone(req.body?.phone);
-  const [taken] = await query('SELECT id FROM users WHERE phone = $1 AND phone_verified AND id <> $2', [phone, req.user.id]);
-  if (taken) throw new HttpError(409, 'That number is already linked to another account');
-  const { ticket } = await issueCode({ purpose: 'phone_verify', channel: 'sms', destination: phone, userId: req.user.id, ip: req.ip, send: true });
-  res.json({ ticket, sentTo: maskPhone(phone) });
-});
-
-accountRouter.post('/phone/verify', async (req, res) => {
-  const row = await verifyCode({ ticket: req.body?.ticket, code: String(req.body?.code ?? ''), purpose: 'phone_verify' });
-  // The code must have been issued to THIS account.
-  if (row.user_id !== req.user.id) throw new HttpError(400, 'That code is not valid or has expired. Request a new one.');
-  try {
-    await tx(async ({ query: q }) => {
-      await q('UPDATE users SET phone = $2, phone_verified = true WHERE id = $1', [req.user.id, row.destination]);
-      await appendAudit(q, { actor: req.user, action: 'auth.phone_verified', ip: req.ip, details: { phone: maskPhone(row.destination) } });
-    });
-  } catch (err) {
-    if (/unique|duplicate/i.test(err.message)) throw new HttpError(409, 'That number is already linked to another account');
-    throw err;
-  }
-  res.json({ phone: maskPhone(row.destination) });
-});
-
-accountRouter.post('/phone/remove', async (req, res) => {
-  if (req.user.is_demo) throw new HttpError(400, DEMO_LOCKED);
-  const [row] = await query('SELECT password_hash FROM users WHERE id = $1', [req.user.id]);
-  // Removing the phone can switch off SMS two-factor, so it needs the password.
-  if (!(await verifyPassword(String(req.body?.password ?? '').slice(0, 200), row.password_hash))) throw new HttpError(400, 'Password is not correct');
-  await tx(async ({ query: q }) => {
-    await q('UPDATE users SET phone = NULL, phone_verified = false, sms_2fa = false WHERE id = $1', [req.user.id]);
-    await appendAudit(q, { actor: req.user, action: 'auth.phone_removed', ip: req.ip });
-  });
-  res.json({ ok: true });
-});
-
-accountRouter.post('/sms-2fa', async (req, res) => {
-  if (req.user.is_demo) throw new HttpError(400, DEMO_LOCKED);
-  const enable = req.body?.enabled === true;
-  const [row] = await query('SELECT password_hash, phone_verified FROM users WHERE id = $1', [req.user.id]);
-  if (!(await verifyPassword(String(req.body?.password ?? '').slice(0, 200), row.password_hash))) throw new HttpError(400, 'Password is not correct');
-  if (enable && !row.phone_verified) throw new HttpError(400, 'Verify a mobile number first');
-  await tx(async ({ query: q }) => {
-    await q('UPDATE users SET sms_2fa = $2 WHERE id = $1', [req.user.id, enable]);
-    if (enable) await q('DELETE FROM sessions WHERE user_id = $1 AND token_hash <> $2', [req.user.id, req.sessionTokenHash]);
-    await appendAudit(q, { actor: req.user, action: enable ? 'auth.sms_2fa_enable' : 'auth.sms_2fa_disable', ip: req.ip });
-  });
-  res.json({ ok: true });
 });

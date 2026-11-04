@@ -46,6 +46,8 @@ ALTER TABLE pending_logins ADD COLUMN IF NOT EXISTS second text NOT NULL DEFAULT
 ALTER TABLE pending_logins ADD COLUMN IF NOT EXISTS otp_ticket_hash text;
 
 -- Self sign-up, email/SMS one-time codes and phone numbers (added 2026-11-04).
+-- The phone / SMS columns below are no longer used (SMS sign-in was removed the same day).
+-- They stay so that existing databases need no destructive migration.
 -- Existing and admin-created accounts count as verified; self sign-ups start unverified.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified boolean NOT NULL DEFAULT true;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS signup_source text NOT NULL DEFAULT 'admin';

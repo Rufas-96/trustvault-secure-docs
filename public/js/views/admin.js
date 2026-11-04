@@ -111,7 +111,6 @@ export async function adminUsersPage() {
         h('td', {}, u.is_active ? h('span', { class: 'pill ok' }, 'Active') : h('span', { class: 'pill denied' }, 'Disabled'),
           u.must_change_password ? h('div', { class: 'small muted' }, 'must set password') : null,
           u.signup_source === 'self' ? h('div', { class: 'small muted' }, u.email_verified ? 'self sign-up' : 'self sign-up, email unverified') : null,
-          u.phone_verified ? h('div', { class: 'small muted' }, `mobile verified${u.sms_2fa ? ', SMS 2FA' : ''}`) : null,
           u.is_demo ? h('div', { class: 'small muted' }, 'demo, protected') : null),
         h('td', {}, u.is_demo || u.id === state.user.id ? null : h('div', { class: 'row' },
           h('button', { class: `btn sm ${u.is_active ? 'danger' : ''}`, onclick: async () => {
