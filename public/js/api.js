@@ -12,6 +12,10 @@ export class ApiError extends Error {
   }
 }
 
+// Time of the last request that reached the server. The server ends a session after 30
+// minutes without requests; the security orb shows a countdown from this.
+export let lastRequestAt = Date.now();
+
 let onUnauthorized = () => {};
 export const setUnauthorizedHandler = (fn) => { onUnauthorized = fn; };
 // The server answers 403 + code PASSWORD_CHANGE_REQUIRED / MFA_SETUP_REQUIRED while the
@@ -29,6 +33,7 @@ export async function api(method, path, body) {
   }
   if (method !== 'GET') headers['x-csrf-token'] = csrfToken;
   const res = await fetch(`/api${path}`, { method, headers, body: payload, credentials: 'same-origin' });
+  lastRequestAt = Date.now();
   const data = res.headers.get('content-type')?.includes('application/json') ? await res.json() : null;
   if (!res.ok) {
     if (res.status === 401 && state401(path)) onUnauthorized();

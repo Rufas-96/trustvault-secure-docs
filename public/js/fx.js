@@ -52,8 +52,27 @@ export function stagger(container, selector) {
   container.querySelectorAll(selector).forEach((el, i) => el.style.setProperty('--i', String(Math.min(i, 14))));
 }
 
-/** Run after a page renders: tilt, counters, staggered rows. */
+/** A slowly rotating 3D cube; each face carries an icon. Decorative only. */
+export function cube3d(icons = ['shield', 'lock', 'files', 'key', 'history', 'eye']) {
+  const faces = ['front', 'back', 'right', 'left', 'top', 'bottom'];
+  return h('div', { class: 'cube-scene', 'aria-hidden': 'true' },
+    h('div', { class: 'cube' }, faces.map((f, i) => h('div', { class: `cube-face ${f}` }, icon(icons[i % icons.length])))),
+    h('div', { class: 'cube-shadow' }));
+}
+
+/** Turn a page header into a 3D hero banner with a floating cube. */
+function heroize(head) {
+  if (head.dataset.hero === 'on') return;
+  head.dataset.hero = 'on';
+  head.classList.add('hero');
+  head.append(cube3d());
+  tilt(head, 3);
+}
+
+/** Run after a page renders: hero banner, tilt, counters, staggered rows. */
 export function enhance(root) {
+  root.querySelectorAll('.page-head').forEach(heroize);
+  root.querySelectorAll('.access-box, .detail-grid .card.card-pad').forEach((el) => tilt(el, 5));
   root.querySelectorAll('.stat, .check-item, .pillar, .security-card, .auth-card').forEach((el) => tilt(el, el.classList.contains('auth-card') ? 4 : 7));
   root.querySelectorAll('[data-count]').forEach(countUp);
   stagger(root, 'tbody tr');
@@ -148,8 +167,11 @@ export function mountFab(actions) {
       fabEl?.classList.remove('open');
       fabEl?.querySelector('.fab-main')?.setAttribute('aria-expanded', 'false');
     };
-    document.addEventListener('keydown', (e) => e.key === 'Escape' && closeCurrent());
-    document.addEventListener('pointerdown', (e) => { if (fabEl && !fabEl.contains(e.target)) closeCurrent(); });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeCurrent(); orbEl?.classList.remove('open'); } });
+    document.addEventListener('pointerdown', (e) => {
+      if (fabEl && !fabEl.contains(e.target)) closeCurrent();
+      if (orbEl && !orbEl.contains(e.target)) orbEl.classList.remove('open');
+    });
   }
 
   if (!topEl) {
@@ -165,4 +187,48 @@ export function unmountFab() {
   fabEl?.remove();
   fabEl = null;
   topEl?.classList.remove('show');
+  orbEl?.remove();
+  orbEl = null;
+  clearInterval(orbTimer);
+}
+
+// ── Floating security orb ────────────────────────────────────────────────────
+// Shows, at a glance: who you are signed in as, whether two-factor is on, and how long
+// until the server ends this session if you stay idle. Clicking opens the details.
+let orbEl = null;
+let orbTimer = null;
+
+/**
+ * info: { user, idleMinutes, lastRequestAt: () => number, onAccount: () => void }
+ */
+export function mountSecurityOrb({ user, idleMinutes, lastRequestAt, onAccount }) {
+  orbEl?.remove();
+  clearInterval(orbTimer);
+  const secure = Boolean(user.mfaEnabled);
+  const countdown = h('b', { class: 'mono' }, '--:--');
+  const bar = h('div', { class: 'orb-bar' });
+  const row = (ic, label, value, ok) => h('div', { class: `orb-row ${ok ? 'ok' : 'warn'}` }, icon(ic), h('span', {}, label), h('b', {}, value));
+  const panel = h('div', { class: 'orb-panel', role: 'dialog', 'aria-label': 'Session security' },
+    h('div', { class: 'orb-title' }, icon('shield'), 'Session security'),
+    row('user', 'Signed in as', user.role[0].toUpperCase() + user.role.slice(1), true),
+    row('key', 'Two-factor', secure ? 'On' : 'Off', secure),
+    row('lock', 'Connection', location.protocol === 'https:' ? 'Encrypted (HTTPS)' : 'Local (HTTP)', location.protocol === 'https:'),
+    h('div', { class: 'orb-idle' }, h('span', {}, 'Auto sign-out if idle in'), countdown, h('div', { class: 'orb-track' }, bar)),
+    h('button', { class: 'btn sm block', type: 'button', onclick: () => { orbEl.classList.remove('open'); onAccount(); } }, icon('lock'), 'Account security'));
+  const button = h('button', { class: `orb ${secure ? 'secure' : 'basic'}`, type: 'button', 'aria-label': 'Session security', title: 'Session security',
+    onclick: () => orbEl.classList.toggle('open') },
+    h('span', { class: 'orb-ring' }), h('span', { class: 'orb-ring r2' }), h('span', { class: 'orb-core' }, icon('shield')));
+  orbEl = h('div', { class: 'orb-wrap' }, panel, button);
+  document.body.append(orbEl);
+
+  const tick = () => {
+    const left = Math.max(0, idleMinutes * 60_000 - (Date.now() - lastRequestAt()));
+    const m = Math.floor(left / 60_000);
+    const s = Math.floor((left % 60_000) / 1000);
+    countdown.textContent = `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+    bar.style.setProperty('--left', `${(left / (idleMinutes * 60_000)) * 100}%`);
+    orbEl.classList.toggle('expiring', left < 5 * 60_000);
+  };
+  tick();
+  orbTimer = setInterval(tick, 1000);
 }

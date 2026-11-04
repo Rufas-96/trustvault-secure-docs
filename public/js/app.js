@@ -1,8 +1,8 @@
 // App entry: session bootstrap, hash router, sign-in page and the app shell.
 import { h, icon, avatar, rolePill, toast } from './ui.js';
-import { get, post, setCsrf, setGateHandler, setUnauthorizedHandler } from './api.js';
+import { get, post, setCsrf, setGateHandler, setUnauthorizedHandler, lastRequestAt } from './api.js';
 import { documentsPage, documentDetailPage, trashPage, uploadDialog } from './views/documents.js';
-import { enhance, installRipple, mountFab } from './fx.js';
+import { enhance, installRipple, mountFab, mountSecurityOrb } from './fx.js';
 import { adminOverviewPage, adminAuditPage, adminUsersPage, adminDocumentsPage } from './views/admin.js';
 import { accountPage } from './views/account.js';
 import { renderAuthPage } from './views/auth.js';
@@ -105,6 +105,7 @@ function renderShell(active, page) {
   root.className = '';
   root.replaceChildren(shell);
   mountFab(quickActions(u));
+  mountSecurityOrb({ user: u, idleMinutes: state.config?.sessionIdleMinutes || 30, lastRequestAt: () => lastRequestAt, onAccount: () => navigate('#/account') });
 }
 
 // Floating quick actions. Convenience only: every action still goes through the server's checks.

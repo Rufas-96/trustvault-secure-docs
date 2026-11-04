@@ -579,3 +579,119 @@ tbody tr.clickable:hover .file-icon { transform: rotate(-6deg) scale(1.08); }
   #toasts { top: 68px; bottom: auto; left: 16px; right: 16px; }
   .toast { min-width: 0; max-width: none; }
 }
+
+/* ════════════════════════════════════════════════════════════════════════════
+   In-app 3D layer: keycap buttons, hero banners with a rotating cube, the floating
+   security orb, extruded file icons. (Reduced-motion rules at the end still apply.)
+   ════════════════════════════════════════════════════════════════════════════ */
+
+/* ── 3D "keycap" buttons: they rise on hover and press down on click ── */
+.btn:not(.ghost) {
+  --depth: var(--border-strong);
+  box-shadow: 0 3px 0 var(--depth), 0 6px 14px rgba(16,24,48,.10);
+  transform: translateY(0);
+}
+.btn:not(.ghost):hover { transform: translateY(-2px); box-shadow: 0 5px 0 var(--depth), 0 12px 24px rgba(16,24,48,.16); }
+.btn:not(.ghost):active { transform: translateY(2px); box-shadow: 0 1px 0 var(--depth), 0 3px 8px rgba(16,24,48,.12); }
+.btn.primary { --depth: #3b2a9e; }
+.btn.primary:hover { box-shadow: 0 5px 0 var(--depth), 0 14px 30px rgba(99,102,241,.45); }
+.btn.danger { --depth: rgba(190,18,60,.45); }
+.btn.sm:not(.ghost) { box-shadow: 0 2px 0 var(--depth), 0 4px 10px rgba(16,24,48,.08); }
+.btn.sm:not(.ghost):hover { box-shadow: 0 4px 0 var(--depth), 0 8px 16px rgba(16,24,48,.14); }
+.btn.sm:not(.ghost):active { box-shadow: 0 0 0 var(--depth); transform: translateY(2px); }
+.btn[disabled] { transform: none !important; box-shadow: none !important; }
+
+/* ── Page hero banner with a floating 3D cube ── */
+.page-head.hero {
+  position: relative; overflow: hidden; padding: 26px 210px 26px 28px; border-radius: 20px; align-items: center;
+  background:
+    radial-gradient(600px 220px at 85% 0%, rgba(99,102,241,.30), transparent 70%),
+    radial-gradient(500px 220px at 0% 100%, rgba(34,211,238,.16), transparent 70%),
+    linear-gradient(135deg, var(--surface), var(--surface-2));
+  border: 1px solid var(--border); box-shadow: var(--shadow);
+}
+.page-head.hero::before { content: ''; position: absolute; inset: 0; pointer-events: none; opacity: .5;
+  background-image: linear-gradient(var(--border) 1px, transparent 1px), linear-gradient(90deg, var(--border) 1px, transparent 1px);
+  background-size: 28px 28px; mask-image: linear-gradient(90deg, transparent 40%, #000); }
+.page-head.hero > * { position: relative; z-index: 1; }
+.page-head.hero h1 { font-size: 26px; background: linear-gradient(90deg, var(--text), var(--accent)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.page-head.hero .crumbs a { color: var(--accent); }
+
+.cube-scene { position: absolute !important; right: 46px; top: 50%; width: 92px; height: 92px; margin-top: -54px; perspective: 600px; z-index: 0 !important; pointer-events: none; }
+.cube { position: absolute; inset: 0; transform-style: preserve-3d; animation: cube-spin 14s linear infinite; }
+.cube-face { position: absolute; inset: 0; display: grid; place-items: center; border-radius: 16px; color: #fff;
+  background: linear-gradient(135deg, rgba(99,102,241,.92), rgba(34,211,238,.82)); border: 1px solid rgba(255,255,255,.35);
+  box-shadow: inset 0 0 22px rgba(255,255,255,.18); backface-visibility: visible; }
+.cube-face svg.icon { width: 34px; height: 34px; stroke-width: 2; filter: drop-shadow(0 3px 6px rgba(0,0,0,.25)); }
+.cube-face.front  { transform: translateZ(46px); }
+.cube-face.back   { transform: rotateY(180deg) translateZ(46px); }
+.cube-face.right  { transform: rotateY(90deg) translateZ(46px); }
+.cube-face.left   { transform: rotateY(-90deg) translateZ(46px); }
+.cube-face.top    { transform: rotateX(90deg) translateZ(46px); }
+.cube-face.bottom { transform: rotateX(-90deg) translateZ(46px); }
+@keyframes cube-spin { from { transform: rotateX(-22deg) rotateY(0deg); } to { transform: rotateX(-22deg) rotateY(360deg); } }
+.cube-shadow { position: absolute; left: 6px; right: 6px; bottom: -34px; height: 14px; border-radius: 50%; background: radial-gradient(closest-side, rgba(99,102,241,.45), transparent); animation: shadow-breathe 3s ease-in-out infinite; }
+.cube-scene .cube { animation: cube-spin 14s linear infinite, cube-float 3s ease-in-out infinite; }
+@keyframes cube-float { 50% { translate: 0 -10px; } }
+@keyframes shadow-breathe { 50% { transform: scale(.75); opacity: .6; } }
+
+/* ── 3D file icons ── */
+.file-icon { box-shadow: 0 3px 0 rgba(0,0,0,.28), 0 8px 16px rgba(0,0,0,.18); transform-style: preserve-3d; }
+tbody tr.clickable:hover .file-icon { transform: perspective(300px) rotateY(-24deg) rotateX(10deg) translateZ(10px) scale(1.08); }
+
+/* Cards swing in with a slight 3D angle as the page loads */
+.page .card { animation: card-swing .7s var(--ease-out) both; }
+@keyframes card-swing { from { opacity: 0; transform: perspective(1000px) rotateX(8deg) translateY(16px); } }
+
+/* ── Floating security orb ── */
+.orb-wrap { position: fixed; left: 272px; bottom: 24px; z-index: 58; }
+.orb { position: relative; width: 52px; height: 52px; border-radius: 50%; border: 0; padding: 0; cursor: pointer; background: transparent; display: grid; place-items: center; }
+.orb-core { position: relative; z-index: 2; width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; color: #fff;
+  background: radial-gradient(circle at 35% 30%, #a7f3d0, #10b981 55%, #047857); box-shadow: 0 8px 22px rgba(16,185,129,.45), inset 0 -4px 8px rgba(0,0,0,.25), inset 0 3px 6px rgba(255,255,255,.4);
+  transition: transform .3s var(--ease-spring); }
+.orb.basic .orb-core { background: radial-gradient(circle at 35% 30%, #fde68a, #f59e0b 55%, #b45309); box-shadow: 0 8px 22px rgba(245,158,11,.45), inset 0 -4px 8px rgba(0,0,0,.25), inset 0 3px 6px rgba(255,255,255,.4); }
+.orb-core svg.icon { width: 22px; height: 22px; stroke-width: 2.2; }
+.orb:hover .orb-core { transform: scale(1.1) rotate(-8deg); }
+.orb-ring { position: absolute; inset: -2px; border-radius: 50%; border: 2px solid rgba(16,185,129,.55); animation: orb-pulse 2.6s ease-out infinite; }
+.orb-ring.r2 { animation-delay: 1.3s; }
+.orb.basic .orb-ring { border-color: rgba(245,158,11,.55); }
+@keyframes orb-pulse { from { transform: scale(.85); opacity: .9; } to { transform: scale(1.7); opacity: 0; } }
+.orb-wrap.expiring .orb-core { background: radial-gradient(circle at 35% 30%, #fecdd3, #f43f5e 55%, #be123c); }
+.orb-panel { position: absolute; left: 0; bottom: 64px; width: 280px; padding: 16px; border-radius: 16px; background: var(--surface); border: 1px solid var(--border);
+  box-shadow: var(--shadow-lg); display: grid; gap: 10px; opacity: 0; pointer-events: none; transform-origin: bottom left;
+  transform: perspective(700px) rotateX(-14deg) translateY(10px) scale(.95); transition: opacity .25s, transform .35s var(--ease-spring); }
+.orb-wrap.open .orb-panel { opacity: 1; pointer-events: auto; transform: none; }
+.orb-title { display: flex; gap: 8px; align-items: center; font-weight: 700; }
+.orb-title svg.icon { color: var(--ok); }
+.orb-row { display: grid; grid-template-columns: 18px 1fr auto; gap: 8px; align-items: center; font-size: 13px; color: var(--text-2); }
+.orb-row svg.icon { width: 16px; height: 16px; }
+.orb-row.ok b { color: var(--ok); }
+.orb-row.warn b { color: var(--warn); }
+.orb-idle { display: grid; grid-template-columns: 1fr auto; gap: 6px; padding: 10px; border-radius: 10px; background: var(--surface-2); font-size: 12.5px; color: var(--text-2); }
+.orb-idle b { font-size: 14px; color: var(--text); }
+.orb-track { grid-column: 1 / -1; height: 5px; border-radius: 99px; background: var(--border); overflow: hidden; }
+.orb-bar { height: 100%; width: var(--left, 100%); background: linear-gradient(90deg, var(--ok), #22d3ee); transition: width 1s linear; }
+.orb-wrap.expiring .orb-bar { background: var(--danger); }
+
+@media (max-width: 860px) {
+  .page-head.hero { padding: 20px; }
+  .cube-scene { display: none; }
+  .orb-wrap { left: 16px; bottom: 16px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .btn:not(.ghost):hover, .btn:not(.ghost):active { transform: none; }
+  .orb-ring { display: none; }
+  .orb-panel { transition: none; }
+}
+/* Cube sizing: fully inside the hero banner, never clipped. */
+.page-head.hero { min-height: 132px; }
+.cube-scene { width: 68px; height: 68px; margin-top: -40px; right: 56px; }
+.cube-face { border-radius: 13px; }
+.cube-face svg.icon { width: 28px; height: 28px; }
+.cube-face.front  { transform: translateZ(34px); }
+.cube-face.back   { transform: rotateY(180deg) translateZ(34px); }
+.cube-face.right  { transform: rotateY(90deg) translateZ(34px); }
+.cube-face.left   { transform: rotateY(-90deg) translateZ(34px); }
+.cube-face.top    { transform: rotateX(90deg) translateZ(34px); }
+.cube-face.bottom { transform: rotateX(-90deg) translateZ(34px); }
+.cube-shadow { bottom: -30px; }

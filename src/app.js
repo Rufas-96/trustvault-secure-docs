@@ -74,7 +74,7 @@ export function createApp() {
 
   // `channels` tells the UI which code deliveries really work here, so it never offers one
   // that does not (e.g. email without a configured provider).
-  api.get('/config', (req, res) => res.json({ categories: CATEGORIES, allowedExtensions: ALLOWED_EXTENSIONS, maxUploadBytes: config.maxUploadBytes, passwordMinLength: MIN_LENGTH, channels: channels() }));
+  api.get('/config', (req, res) => res.json({ categories: CATEGORIES, allowedExtensions: ALLOWED_EXTENSIONS, maxUploadBytes: config.maxUploadBytes, passwordMinLength: MIN_LENGTH, sessionIdleMinutes: config.sessionIdleMinutes, channels: channels() }));
   api.post('/auth/login', login);
   api.post('/auth/mfa', loginMfa);
   api.use('/auth', publicAuthRouter); // sign-up, email-code sign-in, password reset
