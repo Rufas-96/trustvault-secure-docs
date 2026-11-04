@@ -279,6 +279,11 @@ export function renderAuthPage(root, { mode = 'signin', config, onSignedIn }) {
 
   // ── Create account ──
   function signUpView() {
+    if (!channels.email) {
+      return h('div', { class: 'stack' }, tabs('signup'),
+        h('div', {}, h('h2', {}, 'Create your account')),
+        h('div', { class: 'note' }, icon('info'), h('div', {}, 'Self sign-up verifies your email with a one-time code, and email delivery is not configured on this deployment yet, so sign-up is switched off rather than failing. Use a demo account, or ask an administrator to add you.')));
+    }
     const error = errorBox();
     const name = h('input', { class: 'input', autocomplete: 'name', required: true, maxlength: '100', placeholder: 'Priya Shah' });
     const email = h('input', { class: 'input', type: 'email', autocomplete: 'email', required: true, placeholder: 'you@company.com' });
