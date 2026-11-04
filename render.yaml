@@ -5,6 +5,7 @@ services:
     name: trustvault-secure-docs
     runtime: node
     plan: free
+    region: singapore   # same region as the Neon database (AWS ap-southeast-1)
     buildCommand: npm ci --omit=dev
     startCommand: npm start
     healthCheckPath: /healthz
