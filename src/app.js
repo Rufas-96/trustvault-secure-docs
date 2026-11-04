@@ -92,7 +92,14 @@ export function createApp() {
   api.use((req, res) => res.status(404).json({ error: 'Not found' }));
 
   app.use('/api', api);
-  app.use(express.static(publicDir, { index: 'index.html', maxAge: config.isProduction ? '1h' : 0 }));
+  // `no-cache` means "revalidate every time": the browser keeps a copy but asks the server
+  // (via ETag) whether it changed, so a new deploy shows up on the next page load instead of
+  // up to an hour later. Unchanged files cost only a tiny 304 response.
+  app.use(express.static(publicDir, {
+    index: 'index.html',
+    etag: true,
+    setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache'),
+  }));
   // Single-page app: any other GET serves the shell; the client router takes over.
   app.get('/{*splat}', (req, res) => res.sendFile(path.join(publicDir, 'index.html')));
 
