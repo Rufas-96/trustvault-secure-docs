@@ -17,7 +17,11 @@ function gateBanner(u) {
 
 export async function accountPage() {
   const u = state.user;
-  const [{ sessions }, recovery] = await Promise.all([get('/auth/sessions'), u.mfaEnabled ? get('/auth/mfa/recovery-codes') : Promise.resolve(null)]);
+  const [{ sessions }, recovery, { activity }] = await Promise.all([
+    get('/auth/sessions'),
+    u.mfaEnabled ? get('/auth/mfa/recovery-codes') : Promise.resolve(null),
+    get('/auth/activity'),
+  ]);
   const reload = () => navigate('#/account');
 
   // ── Password ──
@@ -71,8 +75,11 @@ export async function accountPage() {
   return h('div', { class: 'stack' },
     h('div', { class: 'page-head' }, h('div', { class: 'titles' }, h('h1', {}, 'Account security'), h('p', {}, `${u.name} · ${u.email}`))),
     gateBanner(u),
+    securityChecklist(u, sessions),
     h('div', { class: 'detail-grid' },
       h('div', { class: 'stack' },
+        phoneCard(u, reload),
+        activityCard(activity),
         h('div', { class: 'card' }, h('div', { class: 'card-head' }, h('div', { class: 'grow' }, h('h3', {}, 'Two-factor sign-in'), h('p', {}, 'A one-time code from your phone on every sign-in.'))), h('div', { class: 'card-pad' }, mfaBody)),
         h('div', { class: 'card' },
           h('div', { class: 'card-head' }, h('div', { class: 'grow' }, h('h3', {}, 'Where you are signed in'), h('p', {}, 'Sessions end after 30 minutes idle or 8 hours total. Sign out any you do not recognise.')),
@@ -140,4 +147,131 @@ function disableMfaDialog() {
         catch (e) { error.textContent = e.message; error.classList.remove('hidden'); }
       } }, 'Turn off')],
   }));
+}
+
+// ── Security checklist ───────────────────────────────────────────────────────
+function securityChecklist(u, sessions) {
+  const items = [
+    { ok: u.emailVerified, title: 'Email verified', text: u.emailVerified ? 'Codes and resets can reach you.' : 'Verify your email.' },
+    { ok: !u.mustChangePassword && !u.isDemo, title: 'Your own strong password', text: u.isDemo ? 'Shared demo account: password is published in the README.' : u.mustChangePassword ? 'Replace the password your administrator set.' : '12+ characters, checked against common passwords, hashed with scrypt.' },
+    { ok: u.mfaEnabled || u.sms2fa, title: 'Two-factor sign-in', text: u.mfaEnabled ? 'Authenticator app required at every sign-in.' : u.sms2fa ? 'SMS code required at every sign-in.' : 'Add an authenticator app or SMS codes.' },
+    { ok: u.phoneVerified, title: 'Verified mobile number', text: u.phoneVerified ? `Linked: ${u.phone}` : 'Optional: lets you sign in with SMS codes.' },
+    { ok: sessions.length <= 2, title: 'Few active sessions', text: `${sessions.length} device${sessions.length === 1 ? '' : 's'} signed in. Sign out any you do not recognise.` },
+  ];
+  const score = items.filter((i) => i.ok).length;
+  const pct = Math.round((score / items.length) * 100);
+  const level = pct >= 80 ? 'strong' : pct >= 50 ? 'fair' : 'weak';
+  const ring = h('div', { class: `score-ring ${level}`, role: 'img', 'aria-label': `Security score ${pct} percent` }, h('b', {}, `${pct}%`), h('span', {}, level));
+  ring.style.setProperty('--pct', String(pct));
+  return h('div', { class: 'card security-card' },
+    h('div', { class: 'security-head' }, ring,
+      h('div', { class: 'grow' }, h('h3', {}, 'Your account protection'),
+        h('p', { class: 'muted' }, `${score} of ${items.length} protections in place. Every sign-in, code and setting change below is written to the tamper-evident audit trail.`))),
+    h('div', { class: 'checklist' }, items.map((i) => h('div', { class: `check-item ${i.ok ? 'ok' : ''}` },
+      h('div', { class: 'check-dot' }, icon(i.ok ? 'check' : 'alert')),
+      h('div', {}, h('b', {}, i.title), h('span', {}, i.text))))));
+}
+
+// ── Mobile number & SMS two-factor ───────────────────────────────────────────
+function phoneCard(u, reload) {
+  const smsOn = Boolean(state.config?.channels?.sms);
+  let body;
+  if (u.isDemo) {
+    body = h('div', { class: 'note' }, icon('info'), h('div', {}, 'Locked on shared demo accounts. Create your own account to try mobile verification.'));
+  } else if (!smsOn && !u.phoneVerified) {
+    body = h('div', { class: 'note' }, icon('info'), h('div', {}, 'Mobile verification and SMS two-factor are built, but no SMS provider is configured on this deployment, so they are switched off here rather than pretending to work.'));
+  } else if (!u.phoneVerified) {
+    const phone = h('input', { class: 'input', type: 'tel', autocomplete: 'tel', placeholder: '98765 43210' });
+    const error = h('div', { class: 'form-error hidden', role: 'alert' });
+    body = h('form', { class: 'stack', onsubmit: async (e) => {
+      e.preventDefault();
+      error.classList.add('hidden');
+      try {
+        const r = await post('/auth/phone/start', { phone: phone.value });
+        const ok = await smsCodeDialog(r);
+        if (ok) { toast('Mobile number verified.'); await refreshUser(); reload(); }
+      } catch (err) { error.textContent = err.message; error.classList.remove('hidden'); }
+    } }, error, h('label', { class: 'field' }, 'Mobile number', phone), h('div', {}, h('button', { class: 'btn primary', type: 'submit' }, 'Send verification code')));
+  } else {
+    const toggleSms = () => passwordDialog(
+      u.sms2fa ? 'Turn off SMS two-factor?' : 'Turn on SMS two-factor',
+      u.sms2fa ? 'Sign-in will need only one factor again.' : 'Every sign-in will need a code texted to this number. Other sessions will be signed out.',
+      (password) => post('/auth/sms-2fa', { enabled: !u.sms2fa, password }),
+    ).then(async (ok) => { if (ok) { toast(u.sms2fa ? 'SMS two-factor off.' : 'SMS two-factor on.'); await refreshUser(); reload(); } });
+    const removePhone = () => passwordDialog('Remove this mobile number?', 'SMS sign-in and SMS two-factor will stop working.', (password) => post('/auth/phone/remove', { password }))
+      .then(async (ok) => { if (ok) { toast('Mobile number removed.'); await refreshUser(); reload(); } });
+    body = h('div', { class: 'stack' },
+      h('div', { class: 'chain ok' }, icon('check'), h('div', {}, h('b', {}, `Verified: ${u.phone}`), h('p', {}, u.sms2fa ? 'SMS codes are required at sign-in.' : 'You can sign in with an SMS code. Turn on SMS two-factor for extra protection.'))),
+      h('div', { class: 'row wrap' },
+        u.mfaEnabled ? h('span', { class: 'muted small' }, 'Your authenticator app is your second factor; it takes priority over SMS.')
+          : h('button', { class: `btn ${u.sms2fa ? 'danger' : 'primary'}`, onclick: toggleSms }, u.sms2fa ? 'Turn off SMS two-factor' : 'Turn on SMS two-factor'),
+        h('button', { class: 'btn danger', onclick: removePhone }, 'Remove number')));
+  }
+  return h('div', { class: 'card' },
+    h('div', { class: 'card-head' }, h('div', { class: 'grow' }, h('h3', {}, 'Mobile number & SMS codes'), h('p', {}, 'Verify a number to sign in with SMS codes or use them as your second factor.'))),
+    h('div', { class: 'card-pad' }, body));
+}
+
+function smsCodeDialog(start) {
+  const code = h('input', { class: 'input mono code-input', inputmode: 'numeric', autocomplete: 'one-time-code', maxlength: '7', placeholder: '123 456' });
+  const error = h('div', { class: 'form-error hidden', role: 'alert' });
+  return modal((close) => ({
+    title: 'Enter the code we texted you',
+    subtitle: `Sent to ${start.sentTo}. Expires in 10 minutes.`,
+    body: [error, code],
+    footer: [h('button', { class: 'btn', onclick: () => close(false) }, 'Cancel'),
+      h('button', { class: 'btn primary', onclick: async () => {
+        try { await post('/auth/phone/verify', { ticket: start.ticket, code: code.value }); close(true); }
+        catch (e) { error.textContent = e.message; error.classList.remove('hidden'); }
+      } }, 'Verify')],
+  }));
+}
+
+function passwordDialog(title, text, action) {
+  const password = h('input', { class: 'input', type: 'password', autocomplete: 'current-password' });
+  const error = h('div', { class: 'form-error hidden', role: 'alert' });
+  return modal((close) => ({
+    title,
+    subtitle: text,
+    body: [error, h('label', { class: 'field' }, 'Confirm with your password', password)],
+    footer: [h('button', { class: 'btn', onclick: () => close(false) }, 'Cancel'),
+      h('button', { class: 'btn primary', onclick: async () => {
+        try { await action(password.value); close(true); } catch (e) { error.textContent = e.message; error.classList.remove('hidden'); }
+      } }, 'Confirm')],
+  }));
+}
+
+// ── Recent security activity ─────────────────────────────────────────────────
+const AUTH_LABELS = {
+  'auth.login': ['Signed in', 'Failed sign-in'],
+  'auth.first_factor': ['First step passed', 'First step failed'],
+  'auth.second_factor': ['Second factor passed', 'Wrong second-factor code'],
+  'auth.logout': ['Signed out'],
+  'auth.signup': ['Account created', 'Sign-up attempt with your email'],
+  'auth.email_verified': ['Email verified'],
+  'auth.password_change': ['Password changed', 'Wrong current password'],
+  'auth.password_reset': ['Password reset by email code'],
+  'auth.password_reset_request': ['Password reset requested'],
+  'auth.mfa_enable': ['Authenticator turned on'],
+  'auth.mfa_disable': ['Authenticator turned off', 'Failed attempt to turn off authenticator'],
+  'auth.phone_verified': ['Mobile number verified'],
+  'auth.phone_removed': ['Mobile number removed'],
+  'auth.sms_2fa_enable': ['SMS two-factor on'],
+  'auth.sms_2fa_disable': ['SMS two-factor off'],
+  'auth.session_revoke': ['Signed out another session'],
+};
+
+function activityCard(activity) {
+  const label = (a) => {
+    const l = AUTH_LABELS[a.action] || [a.action];
+    return a.outcome === 'denied' ? (l[1] || `${l[0]} (refused)`) : l[0];
+  };
+  const detail = (a) => [a.details?.factors ? `using ${a.details.factors.join(' + ')}` : '', a.details?.reason || ''].filter(Boolean).join(' · ');
+  return h('div', { class: 'card' },
+    h('div', { class: 'card-head' }, h('div', { class: 'grow' }, h('h3', {}, 'Recent security activity'), h('p', {}, 'Sign-ins, failed attempts and setting changes on your account. If something here was not you, change your password and sign out other sessions.'))),
+    activity.length ? h('div', { class: 'timeline' }, activity.map((a) => h('div', { class: 'tl-item' },
+      h('div', { class: `tl-dot ${a.outcome}` }),
+      h('div', {}, h('div', { class: 'row wrap' }, h('span', { class: 'what' }, label(a)), a.outcome === 'denied' ? h('span', { class: 'pill denied' }, 'Refused') : null),
+        h('div', { class: 'when' }, `${fmtDateTime(a.at)}${a.ip ? ` · ${a.ip}` : ''}${detail(a) ? ` · ${detail(a)}` : ''}`)))))
+      : h('div', { class: 'empty' }, 'No activity yet.'));
 }

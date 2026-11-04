@@ -346,3 +346,46 @@ tbody tr.clickable:hover { background: var(--surface-2); }
 .recovery-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; padding: 14px; border-radius: 10px; background: var(--surface-2); border: 1px dashed var(--border-strong); font-size: 15px; letter-spacing: .06em; }
 .recovery-grid span { text-align: center; }
 .list-item .who b { display: flex; gap: 8px; align-items: center; }
+
+/* ── Sign-in / sign-up panel ── */
+.auth-panel { display: flex; flex-direction: column; gap: 18px; }
+.auth-tabs { display: grid; grid-template-columns: 1fr 1fr; padding: 4px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--border); }
+.auth-tab { height: 38px; border: 0; border-radius: 9px; background: transparent; color: var(--text-2); font: inherit; font-weight: 600; cursor: pointer; }
+.auth-tab.active { background: var(--surface); color: var(--text); box-shadow: var(--shadow-sm); }
+.seg-block { display: grid; grid-template-columns: repeat(3, 1fr); width: 100%; }
+.seg-block button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.seg-block button svg.icon { width: 15px; height: 15px; }
+.sec-badges { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 22px; max-width: 520px; }
+.sec-badge { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 99px; font-size: 12px; font-weight: 600; color: #d6dcff; background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.12); }
+.sec-badge svg.icon { width: 14px; height: 14px; color: #67e8f9; }
+
+/* Password strength meter */
+.meter { display: grid; gap: 6px; margin-top: -6px; }
+.meter-track { height: 6px; border-radius: 99px; background: var(--surface-2); overflow: hidden; border: 1px solid var(--border); }
+.meter-bar { height: 100%; width: 0; border-radius: 99px; transition: width .2s, background .2s; }
+.meter[data-score="0"] .meter-bar { width: 12%; background: var(--danger); }
+.meter[data-score="1"] .meter-bar { width: 30%; background: var(--danger); }
+.meter[data-score="2"] .meter-bar { width: 55%; background: var(--warn); }
+.meter[data-score="3"] .meter-bar { width: 80%; background: var(--ok); }
+.meter[data-score="4"] .meter-bar { width: 100%; background: var(--ok); }
+.meter-text { color: var(--text-3); }
+.meter[data-score="0"] .meter-text, .meter[data-score="1"] .meter-text { color: var(--danger); }
+.meter[data-score="3"] .meter-text, .meter[data-score="4"] .meter-text { color: var(--ok); }
+
+/* Account security checklist */
+.security-card { padding: 20px; display: grid; gap: 18px; }
+.security-head { display: flex; gap: 18px; align-items: center; }
+.score-ring { --pct: 0; width: 84px; height: 84px; border-radius: 50%; flex: none; display: grid; place-content: center; text-align: center;
+  background: radial-gradient(closest-side, var(--surface) 78%, transparent 79%), conic-gradient(var(--ring) calc(var(--pct) * 1%), var(--surface-2) 0); }
+.score-ring b { font-size: 20px; line-height: 1; }
+.score-ring span { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-3); }
+.score-ring.strong { --ring: var(--ok); }
+.score-ring.fair { --ring: var(--warn); }
+.score-ring.weak { --ring: var(--danger); }
+.checklist { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; }
+.check-item { display: flex; gap: 10px; padding: 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface-2); }
+.check-item b { display: block; font-size: 13.5px; }
+.check-item span { font-size: 12.5px; color: var(--text-3); }
+.check-dot { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; flex: none; background: var(--warn-soft); color: var(--warn); }
+.check-dot svg.icon { width: 15px; height: 15px; }
+.check-item.ok .check-dot { background: var(--ok-soft); color: var(--ok); }

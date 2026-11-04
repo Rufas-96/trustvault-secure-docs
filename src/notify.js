@@ -9,12 +9,14 @@ const env = process.env;
 
 export const outbox = []; // test mode only
 
+const emailProvider = () => Boolean(env.BREVO_API_KEY && env.MAIL_FROM);
+const smsProvider = () => Boolean(env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN && env.TWILIO_FROM);
+
 export function channels() {
-  if (config.isTest) return { email: true, sms: true };
-  return {
-    email: Boolean(env.BREVO_API_KEY && env.MAIL_FROM),
-    sms: Boolean(env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN && env.TWILIO_FROM),
-  };
+  // Tests use the outbox; local development prints codes to the server console. Only a
+  // production deployment depends on real providers being configured.
+  if (!config.isProduction) return { email: true, sms: true };
+  return { email: emailProvider(), sms: smsProvider() };
 }
 
 // Development without providers: print to the server console so the flow can be tried
@@ -26,7 +28,7 @@ export async function sendEmail({ to, subject, text, html }) {
     outbox.push({ channel: 'email', to, subject, text });
     return;
   }
-  if (!channels().email) {
+  if (!emailProvider()) {
     if (devConsole) return console.log(`[dev email] to=${to} subject="${subject}"\n${text}`);
     throw new Error('Email delivery is not configured');
   }
@@ -50,7 +52,7 @@ export async function sendSms({ to, text }) {
     outbox.push({ channel: 'sms', to, text });
     return;
   }
-  if (!channels().sms) {
+  if (!smsProvider()) {
     if (devConsole) return console.log(`[dev sms] to=${to}\n${text}`);
     throw new Error('SMS delivery is not configured');
   }

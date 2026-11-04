@@ -31,10 +31,11 @@ export async function api(method, path, body) {
   const res = await fetch(`/api${path}`, { method, headers, body: payload, credentials: 'same-origin' });
   const data = res.headers.get('content-type')?.includes('application/json') ? await res.json() : null;
   if (!res.ok) {
-    if (res.status === 401 && !path.startsWith('/auth/login') && path !== '/auth/mfa' && path !== '/me') onUnauthorized();
+    if (res.status === 401 && state401(path)) onUnauthorized();
     const err = new ApiError(res.status, data?.error || `Request failed (${res.status})`);
     err.code = data?.details?.code;
-    if (res.status === 403 && err.code) onGate(err.code);
+    err.details = data?.details;
+    if (res.status === 403 && (err.code === 'PASSWORD_CHANGE_REQUIRED' || err.code === 'MFA_SETUP_REQUIRED')) onGate(err.code);
     throw err;
   }
   return data;
@@ -64,4 +65,9 @@ export async function download(docId, version) {
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
+// A 401 from a sign-in step means "wrong code/password", not "your session ended".
+function state401(path) {
+  return !path.startsWith('/auth/') || path.startsWith('/auth/sessions') || path.startsWith('/auth/activity');
 }

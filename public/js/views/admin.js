@@ -110,12 +110,18 @@ export async function adminUsersPage() {
         h('td', {}, u.mfa_enabled ? h('span', { class: 'pill ok' }, 'On') : h('span', { class: `pill ${u.role === 'admin' && !u.is_demo ? 'denied' : ''}` }, 'Off')),
         h('td', {}, u.is_active ? h('span', { class: 'pill ok' }, 'Active') : h('span', { class: 'pill denied' }, 'Disabled'),
           u.must_change_password ? h('div', { class: 'small muted' }, 'must set password') : null,
+          u.signup_source === 'self' ? h('div', { class: 'small muted' }, u.email_verified ? 'self sign-up' : 'self sign-up, email unverified') : null,
+          u.phone_verified ? h('div', { class: 'small muted' }, `mobile verified${u.sms_2fa ? ', SMS 2FA' : ''}`) : null,
           u.is_demo ? h('div', { class: 'small muted' }, 'demo, protected') : null),
         h('td', {}, u.is_demo || u.id === state.user.id ? null : h('div', { class: 'row' },
           h('button', { class: `btn sm ${u.is_active ? 'danger' : ''}`, onclick: async () => {
             if (u.is_active && !(await confirmDialog({ title: `Disable ${u.name}?`, text: 'All of their sessions end now and every request they make is refused. Documents they own stay in place; transfer them from the Documents page.', confirm: 'Disable', danger: true }))) return;
             try { await patch(`/admin/users/${u.id}`, { isActive: !u.is_active }); toast(u.is_active ? `${u.name} disabled.` : `${u.name} enabled.`); reload(); } catch (e) { toast(e.message, 'error'); }
           } }, u.is_active ? 'Disable' : 'Enable'),
+          u.role === 'viewer' && u.is_active ? h('button', { class: 'btn sm', title: 'Allow this person to upload and share documents', onclick: async () => {
+            if (!(await confirmDialog({ title: `Make ${u.name} an owner?`, text: 'Owners can upload documents and share them with named people. Their current sessions end so the new role applies cleanly.', confirm: 'Make owner' }))) return;
+            try { await patch(`/admin/users/${u.id}`, { role: 'owner' }); toast(`${u.name} is now an owner.`); reload(); } catch (e) { toast(e.message, 'error'); }
+          } }, 'Make owner') : null,
           h('button', { class: 'btn sm', title: 'Set a temporary password', onclick: () => resetPasswordDialog(u).then((ok) => ok && reload()) }, 'Reset password'),
           u.mfa_enabled ? h('button', { class: 'btn sm', title: 'For a lost phone', onclick: async () => {
             if (!(await confirmDialog({ title: `Reset two-factor for ${u.name}?`, text: 'Use this only after confirming their identity another way (for example in person). Their sessions end and they set up a new authenticator at next sign-in.', confirm: 'Reset 2FA', danger: true }))) return;

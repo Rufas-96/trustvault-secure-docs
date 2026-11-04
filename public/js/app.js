@@ -4,17 +4,10 @@ import { get, post, setCsrf, setGateHandler, setUnauthorizedHandler } from './ap
 import { documentsPage, documentDetailPage, trashPage } from './views/documents.js';
 import { adminOverviewPage, adminAuditPage, adminUsersPage, adminDocumentsPage } from './views/admin.js';
 import { accountPage } from './views/account.js';
+import { renderAuthPage } from './views/auth.js';
 
 export const state = { user: null, config: null };
 const root = document.getElementById('app');
-
-const DEMO = [
-  { label: 'Administrator', name: 'Ava Administrator', email: 'admin@trustvault.demo', password: 'Admin#Vault2026', role: 'admin' },
-  { label: 'Owner · HR', name: 'Olivia Hart', email: 'olivia.owner@trustvault.demo', password: 'Owner#Vault2026', role: 'owner' },
-  { label: 'Owner · Legal', name: 'Omar Lewis', email: 'omar.owner@trustvault.demo', password: 'Owner2#Vault2026', role: 'owner' },
-  { label: 'Viewer · Employee', name: 'Vik Varma', email: 'vik.viewer@trustvault.demo', password: 'Viewer#Vault2026', role: 'viewer' },
-  { label: 'Viewer · External partner', name: 'Vera Patel', email: 'vera.partner@trustvault.demo', password: 'Partner#Vault2026', role: 'viewer' },
-];
 
 // ── Routes ───────────────────────────────────────────────────────────────────
 const routes = [
@@ -99,7 +92,7 @@ function renderShell(active, page) {
     h('div', { class: 'brand' }, h('div', { class: 'brand-mark' }, icon('shield')), 'TrustVault'),
     sections,
     h('div', { class: 'me' }, avatar(u.name),
-      h('div', { class: 'who' }, h('b', {}, u.name), h('span', {}, `${u.role[0].toUpperCase()}${u.role.slice(1)} · ${u.department || ''}`)),
+      h('div', { class: 'who' }, h('b', {}, u.name), h('span', {}, `${u.role[0].toUpperCase()}${u.role.slice(1)}${u.department ? ` · ${u.department}` : ''}`)),
       h('button', { class: 'btn ghost sm', title: 'Sign out', 'aria-label': 'Sign out', onclick: signOut }, icon('logout'))));
 
   const topbar = h('div', { class: 'topbar' },
@@ -111,107 +104,28 @@ function renderShell(active, page) {
   root.replaceChildren(shell);
 }
 
-// ── Sign-in ──────────────────────────────────────────────────────────────────
+// ── Sign-in / sign-up ────────────────────────────────────────────────────────
 function renderLogin() {
-  if (location.hash && location.hash !== '#/login') sessionStorage.setItem('tv_after_login', location.hash);
-  history.replaceState(null, '', '#/login');
+  const h0 = location.hash;
+  if (h0 && h0 !== '#/login' && h0 !== '#/signup') sessionStorage.setItem('tv_after_login', h0);
+  const mode = h0 === '#/signup' ? 'signup' : 'signin';
+  history.replaceState(null, '', mode === 'signup' ? '#/signup' : '#/login');
+  renderAuthPage(root, { mode, config: state.config, onSignedIn: finishLogin });
+}
 
-  const email = h('input', { class: 'input', type: 'email', name: 'email', autocomplete: 'username', required: true, placeholder: 'you@company.com' });
-  const password = h('input', { class: 'input', type: 'password', name: 'password', autocomplete: 'current-password', required: true, placeholder: '••••••••••' });
-  const error = h('div', { class: 'form-error hidden', role: 'alert' });
-  const submit = h('button', { class: 'btn primary block', type: 'submit' }, 'Sign in');
-
-  const form = h('form', { class: 'login-form', onsubmit: async (e) => {
-    e.preventDefault();
-    error.classList.add('hidden');
-    submit.disabled = true;
-    try {
-      const r = await post('/auth/login', { email: email.value, password: password.value });
-      if (r.mfaRequired) return showMfaStep(r.mfaToken);
-      finishLogin(r);
-    } catch (err) {
-      error.textContent = err.message;
-      error.classList.remove('hidden');
-    } finally {
-      submit.disabled = false;
-    }
-  } },
-    h('div', {}, h('h2', {}, 'Sign in'), h('p', { class: 'muted' }, 'Use your company account, or one of the demo accounts below.')),
-    error,
-    h('label', { class: 'field' }, 'Email', email),
-    h('label', { class: 'field' }, 'Password', password),
-    submit,
-    h('div', { class: 'demo-accounts' },
-      h('div', { class: 'hd' }, 'Demo accounts: click to fill'),
-      DEMO.map((d) => h('button', { type: 'button', class: 'demo-btn', onclick: () => { email.value = d.email; password.value = d.password; submit.focus(); } },
-        avatar(d.name, 'sm'),
-        h('div', { class: 'who' }, h('b', {}, `${d.name} · ${d.label}`), h('span', {}, d.email)), rolePill(d.role)))));
-
-  function finishLogin(r) {
-    setCsrf(r.csrfToken);
-    state.user = r.user;
-    const next = sessionStorage.getItem('tv_after_login');
-    sessionStorage.removeItem('tv_after_login');
-    navigate(next && next !== '#/login' ? next : homeFor(r.user));
+function finishLogin(r) {
+  setCsrf(r.csrfToken);
+  state.user = r.user;
+  // Show the previous sign-in, so an unexpected one is noticed straight away.
+  const last = r.lastSignIn;
+  if (last && last.at) {
+    const when = new Date(last.at).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+    const failed = last.failedSince ? ` · ${last.failedSince} failed attempt${last.failedSince > 1 ? 's' : ''} since` : '';
+    toast(`Last sign-in: ${when} from ${last.ip || 'unknown IP'}${failed}`, last.failedSince ? 'error' : 'ok');
   }
-
-  // Step 2: password was right; now the one-time code (or a recovery code).
-  function showMfaStep(mfaToken) {
-    let useRecovery = false;
-    const code = h('input', { class: 'input mono code-input', inputmode: 'numeric', autocomplete: 'one-time-code', maxlength: '7', placeholder: '123 456', 'aria-label': 'Authentication code' });
-    const mfaError = h('div', { class: 'form-error hidden', role: 'alert' });
-    const label = h('span', {}, '6-digit code from your authenticator app');
-    const verify = h('button', { class: 'btn primary block', type: 'submit' }, 'Verify');
-    const toggle = h('button', { type: 'button', class: 'btn ghost sm', onclick: () => {
-      useRecovery = !useRecovery;
-      label.textContent = useRecovery ? 'Recovery code (e.g. 7KQ4-M2XD)' : '6-digit code from your authenticator app';
-      code.setAttribute('inputmode', useRecovery ? 'text' : 'numeric');
-      code.setAttribute('maxlength', useRecovery ? '9' : '7');
-      code.setAttribute('placeholder', useRecovery ? 'XXXX-XXXX' : '123 456');
-      toggle.textContent = useRecovery ? 'Use authenticator code instead' : 'Lost your phone? Use a recovery code';
-      code.value = '';
-      code.focus();
-    } }, 'Lost your phone? Use a recovery code');
-    const mfaForm = h('form', { class: 'login-form', onsubmit: async (e) => {
-      e.preventDefault();
-      mfaError.classList.add('hidden');
-      verify.disabled = true;
-      try {
-        const body = useRecovery ? { mfaToken, recoveryCode: code.value } : { mfaToken, code: code.value.replace(/\s/g, '') };
-        finishLogin(await post('/auth/mfa', body));
-      } catch (err) {
-        mfaError.textContent = err.message;
-        mfaError.classList.remove('hidden');
-        if (/again/.test(err.message)) setTimeout(() => renderLogin(), 1800);
-      } finally {
-        verify.disabled = false;
-      }
-    } },
-      h('div', { class: 'mfa-badge' }, icon('shield')),
-      h('div', {}, h('h2', {}, 'Two-factor sign-in'), h('p', { class: 'muted' }, 'Your password was correct. Enter the code to finish signing in.')),
-      mfaError,
-      h('label', { class: 'field' }, label, code),
-      verify,
-      h('div', { class: 'row wrap' }, toggle, h('button', { type: 'button', class: 'btn ghost sm', onclick: () => renderLogin() }, 'Start over')));
-    form.replaceWith(mfaForm);
-    code.focus();
-  }
-
-  const pillar = (ic, title, text) => h('div', { class: 'pillar' }, h('div', { class: 'pi' }, icon(ic)), h('div', {}, h('b', {}, title), h('span', {}, text)));
-  root.className = '';
-  root.replaceChildren(h('div', { class: 'login' },
-    h('section', { class: 'login-art' },
-      h('div', { class: 'brand' }, h('div', { class: 'brand-mark' }, icon('shield')), 'TrustVault'),
-      h('div', {},
-        h('h1', {}, 'Share confidential documents. ', h('span', {}, 'Prove who opened them.')),
-        h('p', { class: 'lede' }, 'Per-document permissions checked by the server on every request, instant revocation, and a tamper-evident record of every access, including the ones that were refused.')),
-      h('div', { class: 'pillars' },
-        pillar('lock', 'Only named people', 'Access is granted per document, to a person, with read or edit, and an optional expiry.'),
-        pillar('restore', 'Revocation is immediate', 'No links or tokens that outlive a revoke. The next request is refused.'),
-        pillar('history', 'Evidence, not logs', 'An append-only, HMAC-chained audit trail. Any edit or deletion is detected.')),
-      h('div', { class: 'foot' }, 'TrustVault · RISE hiring challenge 2026')),
-    h('section', { class: 'login-form-wrap' }, form)));
-  email.focus();
+  const next = sessionStorage.getItem('tv_after_login');
+  sessionStorage.removeItem('tv_after_login');
+  navigate(next && next !== '#/login' && next !== '#/signup' ? next : homeFor(r.user));
 }
 
 async function signOut() {

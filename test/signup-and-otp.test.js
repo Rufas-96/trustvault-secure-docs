@@ -251,6 +251,26 @@ describe('O-08 mobile number and SMS', () => {
     assert.equal((await m.post('/api/auth/mfa', { json: { mfaToken: v.data.mfaToken, password: PASSWORD } })).status, 200);
   });
 
+  test('signing in right after a text was sent opens the SMS step (with a cooldown), instead of locking the person out', async () => {
+    const email = uniq('quick');
+    const phone = `+9195${String(Date.now()).slice(-8)}`;
+    const c = await signUp(email);
+    const p = await c.post('/api/auth/phone/start', { json: { phone } });
+    await c.post('/api/auth/phone/verify', { json: { ticket: p.data.ticket, code: lastCodeFor(phone) } });
+    await c.post('/api/auth/sms-2fa', { json: { enabled: true, password: PASSWORD } });
+    // No ageing: the phone-verification text was sent seconds ago.
+    const l = new Client();
+    const r = await l.post('/api/auth/login', { json: { email, password: PASSWORD } });
+    assert.equal(r.status, 200, `correct password must not be refused: ${JSON.stringify(r.data)}`);
+    assert.equal(r.data.method, 'sms');
+    assert.ok(r.data.smsCooldown > 0);
+    await ageCodes();
+    const again = await l.post('/api/auth/mfa/resend-sms', { json: { mfaToken: r.data.mfaToken } });
+    assert.equal(again.status, 200);
+    const done = await l.post('/api/auth/mfa', { json: { mfaToken: r.data.mfaToken, smsTicket: again.data.smsTicket, code: lastCodeFor(phone) } });
+    assert.equal(done.status, 200);
+  });
+
   test('a verified number cannot be claimed by a second account', async () => {
     const phone = `+9197${String(Date.now()).slice(-8)}`;
     const a = await signUp(uniq('pa'));

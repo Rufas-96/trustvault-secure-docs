@@ -128,7 +128,18 @@ async function afterFirstFactor(req, res, user, factor1) {
 
   const ticket = randomToken(32);
   let smsTicket = null;
-  if (second === 'sms') ({ ticket: smsTicket } = await issueCode({ purpose: 'second_sms', channel: 'sms', destination: user.phone, userId: user.id, ip: req.ip, send: true }));
+  let smsCooldown;
+  if (second === 'sms') {
+    try {
+      ({ ticket: smsTicket } = await issueCode({ purpose: 'second_sms', channel: 'sms', destination: user.phone, userId: user.id, ip: req.ip, send: true }));
+    } catch (err) {
+      // A text was sent moments ago (e.g. while verifying the number). Do not lock the person
+      // out after a correct first factor: open the second step anyway and let them press
+      // "Resend" once the cooldown ends. The limits themselves still hold.
+      if (err.status !== 429) throw err;
+      smsCooldown = err.details?.retryAfter ?? 60;
+    }
+  }
   await query('DELETE FROM pending_logins WHERE user_id = $1 OR expires_at < now()', [user.id]);
   await query(
     `INSERT INTO pending_logins (token_hash, user_id, expires_at, ip, factor1, second, otp_ticket_hash)
@@ -136,7 +147,7 @@ async function afterFirstFactor(req, res, user, factor1) {
     [sha256Hex(ticket), user.id, PENDING_LOGIN_MINUTES, req.ip, factor1, second, smsTicket ? sha256Hex(smsTicket) : null],
   );
   await audit({ actor: user, action: 'auth.first_factor', outcome: 'ok', details: { factor: factor1, next: second }, ip: req.ip });
-  res.json({ mfaRequired: true, mfaToken: ticket, method: second, smsTicket, sentTo: second === 'sms' ? maskPhone(user.phone) : undefined });
+  res.json({ mfaRequired: true, mfaToken: ticket, method: second, smsTicket, smsCooldown, sentTo: second === 'sms' ? maskPhone(user.phone) : undefined });
 }
 
 // ── Factor 1: password ───────────────────────────────────────────────────────
