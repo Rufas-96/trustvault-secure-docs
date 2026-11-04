@@ -24,6 +24,58 @@ trail, chain verification, account security, and the real test output.
 
 ---
 
+## Architecture
+
+```mermaid
+flowchart LR
+    U["Browser<br/>vanilla JS, strict CSP"] -->|HTTPS| CF["Cloudflare edge"]
+    CF --> R["Render web service<br/>Singapore"]
+    subgraph APP["Node.js 24 + Express 5"]
+        direction TB
+        MW["Middleware<br/>headers, rate limit, Origin,<br/>session, CSRF"]
+        RT["Routes<br/>documents, admin, users, auth"]
+        AZ["authz.js<br/>the ONLY document<br/>access decision"]
+        AU["audit.js<br/>HMAC-chained log"]
+        MW --> RT --> AZ
+        RT --> AU
+    end
+    R --> APP
+    APP -->|"TLS, certificate verified"| DB[("Neon PostgreSQL<br/>grants, encrypted files,<br/>append-only audit log")]
+    APP -->|HTTPS API| MAIL["Brevo<br/>one-time email codes"]
+    ENV["Host environment<br/>encryption + HMAC keys"] -. never in DB or git .-> APP
+```
+
+**What happens when someone downloads a file**: the authorisation decision is made by
+`requireDocAccess('download')` *before* the route handler runs:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor V as Viewer
+    participant API as GET /documents/:id/download
+    participant AZ as authz.js
+    participant DB as PostgreSQL
+    participant AU as Audit log
+
+    V->>API: request with session cookie
+    API->>AZ: requireDocAccess('download')
+    AZ->>DB: document + live grant for this user?
+    alt no live grant, revoked, expired, deleted, admin, unknown id
+        AZ->>AU: append outcome=denied
+        AZ-->>V: 404 Document not found
+    else read, edit or owner
+        API->>DB: encrypted version
+        API->>API: AES-256-GCM decrypt + SHA-256 check
+        API->>AU: append outcome=ok, before sending
+        API-->>V: file as attachment, nosniff, sandbox CSP
+    end
+```
+
+More diagrams (request pipeline, the full access decision, data model, sign-in flow,
+revocation, and the tamper-evident audit chain): **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
+
+---
+
 ## Demo accounts
 
 The live site is seeded with these accounts. They are shared by everyone evaluating, so their
