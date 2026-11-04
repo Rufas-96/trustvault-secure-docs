@@ -21,7 +21,7 @@ HMAC-chained audit trail.
 ## Demo accounts
 
 The live site is seeded with these accounts. They are shared by everyone evaluating, so their
-password, phone and two-factor settings are locked, and they cannot be disabled. To try
+password and two-factor settings are locked, and they cannot be disabled. To try
 sign-up, two-factor or password reset, **create your own account** on the sign-in page.
 
 | Role | Email | Password | What to try |
@@ -64,9 +64,9 @@ as the admin and find your attempts under **Audit trail → Refused**.
   throttled sign-in with identical errors for unknown emails.
 - **Create an account** with email verification by one-time code (new accounts are viewers;
   an admin can promote them to owner).
-- Sign in with **password**, **email code**, or **SMS code**; second factor by
-  **authenticator app (TOTP, with recovery codes)** or **SMS code**. Never the same factor
-  twice. Administrator accounts (other than the shared demo) must use an authenticator.
+- Sign in with **password** or **email code**; second factor by **authenticator app
+  (TOTP, with recovery codes)**. Administrator accounts (other than the shared demo) must
+  use an authenticator.
 - Forgotten password by email code (ends every session, keeps two-factor).
 - Account security page: protection score, recent sign-in activity including failed
   attempts, active sessions with "sign out" per device or everywhere.
@@ -74,8 +74,6 @@ as the admin and find your attempts under **Audit trail → Refused**.
   every state change, Origin check, 30-minute idle / 8-hour absolute expiry.
 
 ### Known limitations on the live deployment
-- **SMS is switched off.** It is fully built and tested, but needs a Twilio account
-  (`TWILIO_*` variables). The site says so instead of pretending; see [WRITEUP.md](WRITEUP.md).
 - **Code emails may land in Spam/Promotions.** They are sent through Brevo from a free
   @gmail.com address, which cannot pass Gmail's DMARC alignment without a custom domain.
 - Free Render instances sleep when idle (slow first request).
@@ -95,7 +93,7 @@ npm install
 npm start          # http://localhost:3000, demo data is seeded on first start
 ```
 
-In development, email and SMS codes are **printed to the server console** instead of being sent.
+In development, email codes are **printed to the server console** instead of being sent.
 
 Run the tests (each test file starts from a fresh in-memory database):
 
@@ -114,7 +112,6 @@ Start again from empty demo data: stop the server and delete the `.data/` folder
 | `AUDIT_HMAC_KEY` | production | Same format. **Never change it**: the audit chain stops verifying. |
 | `NODE_ENV` | production | `production` enables secure cookies, HSTS, proxy trust, and refuses to start without the keys. |
 | `BREVO_API_KEY`, `MAIL_FROM`, `MAIL_FROM_NAME` | optional | Email codes (sign-up, email sign-in, password reset). `MAIL_FROM` must be a verified Brevo sender. |
-| `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM` | optional | SMS codes. |
 | `SEED_ON_BOOT` | optional | `false` to skip demo data in an empty database. |
 | `TRUST_PROXY` | optional | Override proxy trust (default in production: private ranges + Cloudflare). |
 
@@ -129,7 +126,7 @@ Generate a key: `node -e "console.log(require('crypto').randomBytes(32).toString
 2. On [Render](https://render.com): **New → Blueprint**, choose this repository. `render.yaml`
    creates the web service (Singapore, Node 24) and **generates both keys for you**.
 3. Paste the connection string when Render asks for `DATABASE_URL`, and deploy.
-4. Optional: add the Brevo / Twilio variables under **Environment**.
+4. Optional: add the Brevo variables under **Environment** to enable email codes.
 
 The schema (`db/schema.sql`) is idempotent and applied on every start; demo data is seeded
 only when the database has no users, by the server itself, so it is encrypted with the

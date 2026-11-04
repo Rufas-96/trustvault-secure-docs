@@ -12,8 +12,8 @@ away the moment an owner says so, and recorded in an audit trail that shows tamp
   expiry; grant, change and revoke; ownership transfer for leavers.
 - **Audit:** every access and change including refusals, append-only in the database and
   HMAC-chained, with chain verification and alerts on the admin overview.
-- **Authentication:** verified self sign-up; sign-in by password, email code or SMS code;
-  second factor by authenticator app or SMS; forgotten-password flow; mandatory
+- **Authentication:** verified self sign-up; sign-in by password or email code; second
+  factor by authenticator app with recovery codes; forgotten-password flow; mandatory
   authenticator for administrators; session management and personal security activity.
 - **Tests:** access control on every route, revocation, audit tampering, uploads,
   sessions/CSRF, sign-in, two-factor and one-time codes. Each authorisation check was
@@ -41,7 +41,7 @@ level on this document right now?*
 
 The decision is one function, `effectiveAccess` in `src/authz.js`, and every document route
 calls it through `requireDocAccess(action)` before its handler runs. If you remove that call
-from the download route, a request from anyone with a session gets the file, and 12 of the 88 tests
+from the download route, a request from anyone with a session gets the file, and 12 of the 83 tests
 fail. A refusal is a `404`, so guessing ids tells you nothing, and every refusal is audited.
 
 **What "taking access away immediately" means here:** nothing that outlives a decision is
@@ -67,6 +67,7 @@ the complete list plus its history.
 | **In-browser preview** of PDFs and images | Rendering uploaded content on our origin is an XSS surface. Download-only with a sandbox CSP is safer. |
 | **AI suggestions for who should see a document** | It would have to read document contents or sharing history. Its value is low next to the risk of an AI widening access, and I preferred to spend the time on authentication and testing. If built, it would only *suggest*; a person confirms, and both go in the audit. |
 | **Hard delete, retention policies** | Deletion is soft (restorable); permanent deletion and legal retention rules need decisions a real company would make. |
+| **Mobile number / SMS codes** | I built SMS sign-in and SMS two-factor, with tests, then removed them. Real texts to Indian numbers need a paid provider and DLT registration, so the feature could not work live; an authenticator app is also stronger than SMS (SIM swap), and unused endpoints are attack surface. |
 | **Malware scanning, watermarking** | Need external services; listed as accepted risks in THREATS.md. |
 
 ## How I used AI, and where it was wrong
@@ -87,7 +88,7 @@ entries; the important ones:
 5. **Account enumeration through the rate limiter, and codes emailed to strangers**, caused
    by a JavaScript default parameter. Found because my own mutation check "passed" when it
    should not have.
-6. **SMS two-factor locked out a user who typed the right password.** Found only by driving
+6. **SMS two-factor locked out a user who typed the right password** (SMS has since been removed). Found only by driving
    the real UI.
 
 The pattern I learned: the AI writes code that passes the tests it also writes. The bugs
@@ -95,9 +96,6 @@ showed up when I broke the code on purpose, ran it on the real host, or clicked 
 
 ## What is unfinished
 
-- **SMS is not live.** The code, tests and UI are complete, but sending texts needs a paid or
-  trial Twilio account (and Indian DLT registration for real use). The site says so instead of
-  pretending; sign-in by email code, authenticator apps and passwords all work live.
 - **Code emails can land in Spam**, because they are sent from a free Gmail address via
   Brevo; a custom domain with SPF/DKIM would fix that.
 - **Audit chain anchoring:** someone with both the database and the server's key could

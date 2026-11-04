@@ -68,7 +68,7 @@ sure nothing can go around it.
 | A-12 | **Stolen session cookie** | `HttpOnly`, `Secure`, `SameSite=Strict`, `__Host-` prefix; only a hash is stored server-side; 30-min idle / 8-h absolute expiry; users see every session and can end any; password change and 2FA enrolment end other sessions. Not bound to IP (mobile users change IP constantly). | T-32, A-06 | Partial |
 | A-13 | **CSRF**, including login CSRF (sign the victim into the attacker's account) | CSRF token header on every state change; SameSite=Strict; Origin check on every state change including sign-in and sign-up. | T-32, A-07 | Closed |
 | A-14 | **Bypass two-factor** after the password step | No session exists until every factor is proven; the pending ticket is short-lived, single-purpose, 5 attempts. TOTP codes cannot be replayed (last used time-step stored). Recovery codes are single use. | A-01, A-02 | Closed |
-| A-15 | Two-factor that is **the same factor twice** (SMS code then SMS code) | `secondFactorFor()`: SMS first → password second. | O-08 | Closed |
+| A-15 | Second factor that is really **the same factor twice** | Only an authenticator app (or its recovery codes) counts as a second factor; an email code is a *first* factor, so email + email is impossible. SMS was built and then removed (see WRITEUP). | A-02, O-05 | Closed |
 | A-16 | **Admin account without 2FA** | Real admin accounts cannot use any admin endpoint until an authenticator is on, and cannot turn it off. | A-03 | Closed |
 | A-16b | The **published demo admin** has no 2FA | Evaluators share it; enforcing 2FA would let the first person to enrol lock out everyone else. The demo admin cannot read documents anyway (T-09). | (by design) | Accepted |
 | A-17 | **Admin-set initial password** is known to the admin | Must be changed at first sign-in; every other endpoint is gated until it is. | A-03 | Closed |
@@ -77,11 +77,9 @@ sure nothing can go around it.
 | A-19b | Timing on code requests: a real send waits for the email API (~0.3 s), an unknown address returns faster | Not equalised. The fix is a background send queue. | (none) | Accepted |
 | A-20 | **Account pre-hijacking**: attacker registers the victim's email first, with the attacker's password | Unverified accounts cannot sign in; a later sign-up for the same address replaces the password, and whoever proves the inbox owns the account. | O-04, O-03 | Closed |
 | A-21 | **OTP brute force** | 6 digits from `crypto.randomInt`, 10-minute expiry, 5 guesses then burned, code bound to a 256-bit ticket held by the requesting browser, stored as HMAC. | O-05 | Closed |
-| A-22 | Use the server as a **spam / SMS-bombing relay** | 60 s cooldown and 5/hour per destination, 20/hour per IP; codes only go to verified accounts (an AI-introduced bug that emailed unknown addresses was caught, PROMPTS #5). | O-02, O-06 | Closed |
-| A-23 | **SIM swap** defeats SMS codes | SMS is weaker than an authenticator; the authenticator takes priority when both exist, and admins must use an authenticator. | (design) | Accepted |
-| A-24 | Claim **someone else's phone number** or verify it with a code sent to another account | Verified numbers are unique; a phone code is only valid for the account it was issued to. | O-08 | Closed |
+| A-22 | Use the server as an **email-bombing / spam relay** | 60 s cooldown and 5/hour per destination, 20/hour per IP; codes only go to verified accounts (an AI-introduced bug that emailed unknown addresses was caught, PROMPTS #5). | O-02, O-06 | Closed |
 | A-25 | **Bulk self sign-up** (bots) | 10 sign-ups per IP per hour; accounts are useless until the email is verified, and are viewers (cannot upload). No CAPTCHA. | O-01 | Partial |
-| A-26 | **Lock evaluators out** by changing the published demo accounts | Demo accounts cannot have password/phone/2FA changed, or be disabled or demoted. | A-05, T-34 | Closed |
+| A-26 | **Lock evaluators out** by changing the published demo accounts | Demo accounts cannot have password/2FA changed, or be disabled or demoted. | A-05, T-34 | Closed |
 
 ## 5. Malicious files
 
@@ -129,5 +127,5 @@ These came from testing my own system, not from a checklist:
    emailing codes to addresses with no account. (A-22)
 4. **Copying ciphertext between rows** would have served the wrong document to a legitimate
    grantee, without AAD binding. (T-34f)
-5. **SMS two-factor locked out a person who had just typed the correct password** when the
+5. **SMS two-factor (since removed) locked out a person who had just typed the correct password** when the
    text hit its own cooldown. Not a confidentiality issue, but an availability one. (PROMPTS #6)

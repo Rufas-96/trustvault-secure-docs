@@ -34,18 +34,15 @@ or restore it.
 
 | Method | Path | Who | Notes |
 |---|---|---|---|
-| GET | `/config` | anyone | Categories, allowed file types, size limit, password minimum, and which code channels (`email`, `sms`) are enabled. |
+| GET | `/config` | anyone | Categories, allowed file types, size limit, password minimum, and whether email codes are enabled (`channels.email`). |
 | GET | `/session` | anyone | `{ user, csrfToken }` if signed in, else `{ user: null }`. |
 | POST | `/auth/login` | anyone | `{ email, password }` → `{ user, csrfToken, lastSignIn }`, or `{ mfaRequired, mfaToken, method }` when a second factor is needed. Unverified email → `403 EMAIL_NOT_VERIFIED` with a new code ticket. Same `401` for unknown email, wrong password, disabled account. |
-| POST | `/auth/mfa` | holder of an `mfaToken` | Second factor. `method: totp` → `{ code }` or `{ recoveryCode }`; `sms` → `{ smsTicket, code }`; `password` → `{ password }`. 5 wrong attempts burn the token. |
-| POST | `/auth/mfa/resend-sms` | holder of an `mfaToken` | New SMS code for the pending sign-in. |
-| POST | `/auth/signup` | anyone | `{ name, email, password, phone? }` → `{ ticket, sentTo }`. Creates a **viewer** with an unverified email. Identical response if the email is already registered (nothing is sent). |
+| POST | `/auth/mfa` | holder of an `mfaToken` | Second factor (`method: totp`): `{ code }` from the authenticator app, or a one-time `{ recoveryCode }`. 5 wrong attempts burn the token. |
+| POST | `/auth/signup` | anyone | `{ name, email, password }` → `{ ticket, sentTo }`. Creates a **viewer** with an unverified email. Identical response if the email is already registered (nothing is sent). |
 | POST | `/auth/signup/verify` | holder of the ticket | `{ ticket, code }` → signed in. |
 | POST | `/auth/signup/resend` | anyone | `{ email }` → new ticket. Sends only to unverified self sign-ups. |
 | POST | `/auth/email-code/start` | anyone | `{ email }` → `{ ticket, sentTo }`. Sends only to verified, active, non-demo accounts; identical response and limits otherwise. `503` if email is not configured. |
 | POST | `/auth/email-code/verify` | holder of the ticket | `{ ticket, code }` → signed in, or second-factor step. |
-| POST | `/auth/sms-code/start` | anyone | `{ phone }` (Indian 10-digit or E.164). Sends only to a verified number. `503 SMS_DISABLED` without a provider. |
-| POST | `/auth/sms-code/verify` | holder of the ticket | `{ ticket, code }` → second factor (password, or authenticator if enabled). |
 | POST | `/auth/password-reset/start` | anyone | `{ email }` → `{ ticket, sentTo }`. Identical response for unknown emails. |
 | POST | `/auth/password-reset/complete` | holder of the ticket | `{ ticket, code, newPassword }`. Ends every session; does not sign in; two-factor stays on. |
 
@@ -64,10 +61,6 @@ or restore it.
 | POST | `/auth/mfa/enable` | non-demo users | `{ code }` → 10 one-time recovery codes (shown once). Ends other sessions. |
 | POST | `/auth/mfa/disable` | non-admin users | `{ password, code }`. Real administrators cannot disable it. |
 | GET | `/auth/mfa/recovery-codes` | any signed-in user | Number of unused recovery codes. |
-| POST | `/auth/phone/start` | non-demo users | `{ phone }` → SMS code. `409` if verified on another account. |
-| POST | `/auth/phone/verify` | the account the code was issued to | `{ ticket, code }`. |
-| POST | `/auth/phone/remove` | non-demo users | `{ password }`. Also turns off SMS two-factor. |
-| POST | `/auth/sms-2fa` | non-demo users with a verified phone | `{ enabled, password }`. |
 
 ## Documents
 
