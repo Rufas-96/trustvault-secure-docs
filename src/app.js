@@ -5,7 +5,8 @@ import express from 'express';
 import multer from 'multer';
 import { config } from './config.js';
 import { audit } from './audit.js';
-import { loadSession, login, logout, publicUser, requireAuth, requireCsrf } from './auth.js';
+import { accountRouter, loadSession, login, loginMfa, logout, publicUser, requireAccountReady, requireAuth, requireCsrf, requireSameOrigin } from './auth.js';
+import { MIN_LENGTH } from './passwords.js';
 import { HttpError } from './http.js';
 import { CATEGORIES } from './http.js';
 import { ALLOWED_EXTENSIONS } from './files.js';
@@ -62,19 +63,24 @@ export function createApp() {
   });
   if (!config.isTest) api.use(apiRateLimit());
   api.use(express.json({ limit: '32kb' }));
+  api.use(requireSameOrigin);
   api.use(loadSession);
   api.use(requireCsrf);
 
-  api.get('/config', (req, res) => res.json({ categories: CATEGORIES, allowedExtensions: ALLOWED_EXTENSIONS, maxUploadBytes: config.maxUploadBytes }));
+  api.get('/config', (req, res) => res.json({ categories: CATEGORIES, allowedExtensions: ALLOWED_EXTENSIONS, maxUploadBytes: config.maxUploadBytes, passwordMinLength: MIN_LENGTH }));
   api.post('/auth/login', login);
+  api.post('/auth/mfa', loginMfa);
   api.post('/auth/logout', requireAuth, logout);
   api.get('/me', requireAuth, (req, res) => res.json({ user: publicUser(req.user), csrfToken: req.csrfToken }));
   // Same as /me, but 200 with user:null when signed out, so the page can boot without a 401.
   api.get('/session', (req, res) => res.json(req.user ? { user: publicUser(req.user), csrfToken: req.csrfToken } : { user: null }));
+  // Account security (password, two-factor, sessions) stays reachable even while the
+  // account is gated, because that is where the user fixes what the gate is asking for.
+  api.use('/auth', requireAuth, accountRouter);
 
-  api.use('/documents', requireAuth, documentsRouter);
-  api.use('/users', requireAuth, usersRouter);
-  api.use('/admin', requireAuth, adminRouter);
+  api.use('/documents', requireAuth, requireAccountReady, documentsRouter);
+  api.use('/users', requireAuth, requireAccountReady, usersRouter);
+  api.use('/admin', requireAuth, requireAccountReady, adminRouter);
   api.use((req, res) => res.status(404).json({ error: 'Not found' }));
 
   app.use('/api', api);

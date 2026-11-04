@@ -2,7 +2,7 @@
 import { after, before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { as, Client, DEMO_USERS, docId, DOCS, query, start, stop, userId } from './helpers.js';
+import { as, Client, createUser, DEMO_USERS, docId, DOCS, query, start, stop, userId } from './helpers.js';
 
 before(start);
 after(stop);
@@ -64,21 +64,17 @@ describe('T-05 expired grants give no access', () => {
 describe('T-14 disabling a person ends their access at once', () => {
   test('an active session stops working the moment an admin disables the account', async () => {
     const admin = await as('admin');
-    const email = `leaver-${randomUUID().slice(0, 8)}@trustvault.demo`;
-    const created = await admin.post('/api/admin/users', { json: { email, name: 'Leaver', role: 'viewer', password: 'leaver-password-1' } });
-    assert.equal(created.status, 201);
+    const { client: leaver, id: leaverId, email, password } = await createUser(admin, { role: 'viewer', prefix: 'leaver' });
 
     const olivia = await as('olivia');
     const id = await docId(DOCS.handbook);
-    await olivia.post(`/api/documents/${id}/grants`, { json: { userId: created.data.user.id, permission: 'read' } });
-
-    const leaver = await new Client().login(email, 'leaver-password-1');
+    await olivia.post(`/api/documents/${id}/grants`, { json: { userId: leaverId, permission: 'read' } });
     assert.equal((await leaver.get(`/api/documents/${id}/download`)).status, 200);
 
-    assert.equal((await admin.patch(`/api/admin/users/${created.data.user.id}`, { json: { isActive: false } })).status, 200);
+    assert.equal((await admin.patch(`/api/admin/users/${leaverId}`, { json: { isActive: false } })).status, 200);
     assert.equal((await leaver.get(`/api/documents/${id}/download`)).status, 401);
     assert.equal((await leaver.get('/api/me')).status, 401);
-    await assert.rejects(new Client().login(email, 'leaver-password-1'));
+    await assert.rejects(new Client().login(email, password));
   });
 
   test('a disabled user is refused even if a session row somehow survives', async () => {
@@ -95,15 +91,13 @@ describe('T-14 disabling a person ends their access at once', () => {
 describe('T-20 transferring ownership', () => {
   test('the previous owner loses access immediately and the new owner gains it', async () => {
     const admin = await as('admin');
-    const email = `newowner-${randomUUID().slice(0, 8)}@trustvault.demo`;
-    const created = await admin.post('/api/admin/users', { json: { email, name: 'New Owner', role: 'owner', password: 'new-owner-pass-1' } });
+    const { client: newOwner, id: newOwnerId } = await createUser(admin, { role: 'owner', prefix: 'newowner' });
     const omar = await as('omar');
     const id = await docId(DOCS.ndaGlobex);
     assert.equal((await omar.get(`/api/documents/${id}/download`)).status, 200);
 
-    assert.equal((await admin.post(`/api/admin/documents/${id}/transfer`, { json: { newOwnerId: created.data.user.id } })).status, 200);
+    assert.equal((await admin.post(`/api/admin/documents/${id}/transfer`, { json: { newOwnerId } })).status, 200);
     assert.equal((await omar.get(`/api/documents/${id}/download`)).status, 404);
-    const newOwner = await new Client().login(email, 'new-owner-pass-1');
     assert.equal((await newOwner.get(`/api/documents/${id}/download`)).status, 200);
   });
 });

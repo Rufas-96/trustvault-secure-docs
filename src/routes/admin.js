@@ -8,6 +8,7 @@ import { requireRole } from '../authz.js';
 import { hashPassword } from '../crypto.js';
 import { HttpError, isUuid, likePattern, str } from '../http.js';
 import { publicUser } from '../auth.js';
+import { assertStrongPassword } from '../passwords.js';
 
 export const adminRouter = Router();
 adminRouter.use(requireRole('admin'));
@@ -137,7 +138,7 @@ adminRouter.post('/documents/:id/transfer', async (req, res) => {
 // ── Users ────────────────────────────────────────────────────────────────────
 adminRouter.get('/users', async (req, res) => {
   const rows = await query(`
-    SELECT u.id, u.email, u.name, u.role, u.department, u.is_active, u.is_demo, u.created_at,
+    SELECT u.id, u.email, u.name, u.role, u.department, u.is_active, u.is_demo, u.created_at, u.mfa_enabled, u.must_change_password,
            (SELECT count(*)::int FROM documents d WHERE d.owner_id = u.id AND d.deleted_at IS NULL) AS owned_documents,
            (SELECT count(*)::int FROM grants g WHERE g.grantee_id = u.id AND g.revoked_at IS NULL) AS live_grants,
            (SELECT count(*)::int FROM sessions s WHERE s.user_id = u.id AND s.expires_at > now()) AS sessions
@@ -153,17 +154,53 @@ adminRouter.post('/users', async (req, res) => {
   const role = req.body?.role;
   if (!ROLES.includes(role)) throw new HttpError(400, 'Role must be admin, owner or viewer');
   const password = typeof req.body?.password === 'string' ? req.body.password : '';
-  if (password.length < 10 || password.length > 200) throw new HttpError(400, 'Password must be 10 to 200 characters');
+  assertStrongPassword(password, { email, name });
 
   const [exists] = await query('SELECT 1 FROM users WHERE email = $1', [email]);
   if (exists) throw new HttpError(409, 'A user with that email already exists');
   const id = randomUUID();
   const hash = await hashPassword(password);
   await tx(async ({ query: q }) => {
-    await q(`INSERT INTO users (id, email, name, role, department, password_hash) VALUES ($1,$2,$3,$4,$5,$6)`, [id, email, name, role, department, hash]);
+    // The admin knows this initial password, so the person must replace it at first sign-in.
+    await q(`INSERT INTO users (id, email, name, role, department, password_hash, must_change_password) VALUES ($1,$2,$3,$4,$5,$6,true)`, [id, email, name, role, department, hash]);
     await appendAudit(q, { actor: req.user, action: 'user.create', targetUserId: id, ip: req.ip, details: { email, role } });
   });
   res.status(201).json({ user: publicUser({ id, email, name, role, department }) });
+});
+
+async function loadManageableUser(req) {
+  if (!isUuid(req.params.id)) throw new HttpError(404, 'User not found');
+  if (req.params.id === req.user.id) throw new HttpError(400, 'Use your own Account page for your own account');
+  const [target] = await query('SELECT * FROM users WHERE id = $1', [req.params.id]);
+  if (!target) throw new HttpError(404, 'User not found');
+  if (target.is_demo) throw new HttpError(400, 'The published demo accounts are protected so evaluators cannot lock each other out. Create a new user to try this.');
+  return target;
+}
+
+// Forgotten password: the admin sets a temporary one, which must be changed at next sign-in.
+adminRouter.post('/users/:id/reset-password', async (req, res) => {
+  const target = await loadManageableUser(req);
+  const password = typeof req.body?.password === 'string' ? req.body.password : '';
+  assertStrongPassword(password, target);
+  const hash = await hashPassword(password);
+  await tx(async ({ query: q }) => {
+    await q('UPDATE users SET password_hash = $2, must_change_password = true, password_changed_at = now() WHERE id = $1', [target.id, hash]);
+    await q('DELETE FROM sessions WHERE user_id = $1', [target.id]);
+    await appendAudit(q, { actor: req.user, action: 'user.password_reset', targetUserId: target.id, ip: req.ip, details: { email: target.email } });
+  });
+  res.json({ ok: true });
+});
+
+// Lost phone: clear two-factor so the person can enrol again. Ends their sessions.
+adminRouter.post('/users/:id/reset-mfa', async (req, res) => {
+  const target = await loadManageableUser(req);
+  await tx(async ({ query: q }) => {
+    await q('UPDATE users SET mfa_enabled = false, mfa_secret_enc = NULL WHERE id = $1', [target.id]);
+    await q('DELETE FROM mfa_recovery_codes WHERE user_id = $1', [target.id]);
+    await q('DELETE FROM sessions WHERE user_id = $1', [target.id]);
+    await appendAudit(q, { actor: req.user, action: 'user.mfa_reset', targetUserId: target.id, ip: req.ip, details: { email: target.email } });
+  });
+  res.json({ ok: true });
 });
 
 // Enable / disable a user, or change their role.

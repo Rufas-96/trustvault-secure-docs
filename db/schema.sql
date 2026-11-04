@@ -13,6 +13,33 @@ CREATE TABLE IF NOT EXISTS users (
   created_at     timestamptz NOT NULL DEFAULT now()
 );
 
+-- Authentication hardening (added 2026-11-04). ADD COLUMN IF NOT EXISTS keeps this idempotent.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password boolean NOT NULL DEFAULT false;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS password_changed_at timestamptz NOT NULL DEFAULT now();
+-- TOTP secret, AES-256-GCM encrypted with the server key (never stored in plain text).
+ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_enabled boolean NOT NULL DEFAULT false;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_secret_enc text;
+-- Highest TOTP time-step accepted so far: a code can never be used twice.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_last_step bigint NOT NULL DEFAULT 0;
+
+-- One-time recovery codes, stored as SHA-256 hashes.
+CREATE TABLE IF NOT EXISTS mfa_recovery_codes (
+  user_id    uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  code_hash  text NOT NULL,
+  used_at    timestamptz,
+  PRIMARY KEY (user_id, code_hash)
+);
+
+-- A password check that passed but still needs a second factor. Short-lived, limited
+-- attempts, and only the hash of its token is stored.
+CREATE TABLE IF NOT EXISTS pending_logins (
+  token_hash  text PRIMARY KEY,
+  user_id     uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  expires_at  timestamptz NOT NULL,
+  attempts    integer NOT NULL DEFAULT 0,
+  ip          text
+);
+
 -- Server-side sessions. The cookie holds a random token; only its SHA-256 is stored,
 -- so a leaked database row cannot be replayed as a cookie.
 CREATE TABLE IF NOT EXISTS sessions (
@@ -26,6 +53,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   user_agent    text
 );
 CREATE INDEX IF NOT EXISTS sessions_user_idx ON sessions(user_id);
+-- Public id so a user can list and end their own sessions without ever seeing a token hash.
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS id uuid NOT NULL DEFAULT gen_random_uuid();
 
 CREATE TABLE IF NOT EXISTS documents (
   id               uuid PRIMARY KEY,

@@ -71,6 +71,23 @@ export async function as(key) {
   return new Client().login(u.email, u.password);
 }
 
+/**
+ * Admin creates a person, who signs in and replaces the initial password (as the app
+ * requires). Returns { client, id, email, password }.
+ */
+export async function createUser(admin, { role = 'viewer', name = 'Test Person', prefix = 'user' } = {}) {
+  const { randomBytes } = await import('node:crypto');
+  const email = `${prefix}-${randomBytes(4).toString('hex')}@example.test`;
+  const initial = `Init-${randomBytes(9).toString('base64url')}`;
+  const created = await admin.post('/api/admin/users', { json: { email, name, role, password: initial } });
+  if (created.status !== 201) throw new Error(`create user failed: ${created.status} ${JSON.stringify(created.data)}`);
+  const client = await new Client().login(email, initial);
+  const password = `Mine-${randomBytes(9).toString('base64url')}`;
+  const changed = await client.post('/api/auth/password', { json: { currentPassword: initial, newPassword: password } });
+  if (changed.status !== 200) throw new Error(`password change failed: ${JSON.stringify(changed.data)}`);
+  return { client, id: created.data.user.id, email, password };
+}
+
 export async function docId(title) {
   const [d] = await query('SELECT id FROM documents WHERE title = $1', [title]);
   if (!d) throw new Error(`no document titled ${title}`);
