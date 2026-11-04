@@ -12,7 +12,7 @@ function chainBanner(chain) {
 // ── Overview ─────────────────────────────────────────────────────────────────
 export async function adminOverviewPage() {
   const [{ counts, alerts, chain }, recent] = await Promise.all([get('/admin/overview'), get('/admin/audit?outcome=denied')]);
-  const stat = (label, value, ic, alert) => h('div', { class: `card stat ${alert ? 'alert' : ''}` }, h('div', { class: 'label' }, icon(ic), label), h('div', { class: 'value' }, String(value)));
+  const stat = (label, value, ic, alert) => h('div', { class: `card stat ${alert ? 'alert' : ''}` }, h('div', { class: 'label' }, icon(ic), label), h('div', { class: 'value', dataset: { count: String(value) } }, String(value)));
   return h('div', { class: 'stack' },
     h('div', { class: 'page-head' }, h('div', { class: 'titles' }, h('h1', {}, 'Security overview'), h('p', {}, 'What is happening across TrustVault, and what deserves a closer look.'))),
     chainBanner(chain),

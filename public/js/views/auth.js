@@ -3,6 +3,7 @@
 // server; the UI only explains it.
 import { h, icon, avatar, rolePill, toast } from '../ui.js';
 import { post } from '../api.js';
+import { enhance, particles, unmountFab, vault3d } from '../fx.js';
 
 const DEMO = [
   { label: 'Administrator', name: 'Ava Administrator', email: 'admin@trustvault.demo', password: 'Admin#Vault2026', role: 'admin' },
@@ -368,8 +369,11 @@ export function renderAuthPage(root, { mode = 'signin', config, onSignedIn }) {
   // ── Layout ──
   const pillar = (ic, title, text) => h('div', { class: 'pillar' }, h('div', { class: 'pi' }, icon(ic)), h('div', {}, h('b', {}, title), h('span', {}, text)));
   root.className = '';
+  unmountFab();
   root.replaceChildren(h('div', { class: 'login' },
     h('section', { class: 'login-art' },
+      particles(22),
+      vault3d(),
       h('div', { class: 'brand' }, h('div', { class: 'brand-mark' }, icon('shield')), 'TrustVault'),
       h('div', {},
         h('h1', {}, 'Share confidential documents. ', h('span', {}, 'Prove who opened them.')),
@@ -380,6 +384,7 @@ export function renderAuthPage(root, { mode = 'signin', config, onSignedIn }) {
         pillar('shield', 'Strong sign-in', 'Verified email, one-time codes, authenticator apps as a second factor, and rate limits on every guess.'),
         pillar('history', 'Evidence, not logs', 'An append-only, HMAC-chained audit trail. Any edit or deletion is detected.')),
       h('div', { class: 'foot' }, 'TrustVault · RISE hiring challenge 2026')),
-    h('section', { class: 'login-form-wrap' }, h('div', { class: 'login-form' }, panel))));
+    h('section', { class: 'login-form-wrap' }, h('div', { class: 'auth-card' }, h('div', { class: 'login-form' }, panel)))));
   show(mode === 'signup' ? signUpView() : signInView());
+  enhance(root);
 }

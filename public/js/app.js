@@ -1,7 +1,8 @@
 // App entry: session bootstrap, hash router, sign-in page and the app shell.
 import { h, icon, avatar, rolePill, toast } from './ui.js';
 import { get, post, setCsrf, setGateHandler, setUnauthorizedHandler } from './api.js';
-import { documentsPage, documentDetailPage, trashPage } from './views/documents.js';
+import { documentsPage, documentDetailPage, trashPage, uploadDialog } from './views/documents.js';
+import { enhance, installRipple, mountFab } from './fx.js';
 import { adminOverviewPage, adminAuditPage, adminUsersPage, adminDocumentsPage } from './views/admin.js';
 import { accountPage } from './views/account.js';
 import { renderAuthPage } from './views/auth.js';
@@ -55,6 +56,7 @@ async function render() {
   renderShell(route.nav, page);
   try {
     page.append(await route.render(location.hash.match(route.re)));
+    enhance(page);
   } catch (err) {
     page.append(h('div', { class: 'card empty' }, icon('alert'), h('b', {}, err.status === 404 ? 'Not found' : 'Something went wrong'),
       h('p', {}, err.status === 404 ? 'This document does not exist, or you do not have access to it.' : err.message),
@@ -102,6 +104,33 @@ function renderShell(active, page) {
   shell.append(sidebar, h('div', { class: 'main' }, topbar, page));
   root.className = '';
   root.replaceChildren(shell);
+  mountFab(quickActions(u));
+}
+
+// Floating quick actions. Convenience only: every action still goes through the server's checks.
+function quickActions(u) {
+  const go = (hash) => () => navigate(hash);
+  const focusSearch = () => {
+    const open = () => document.querySelector('.filters input[type=search]')?.focus();
+    if (/^#\/(documents|mine|shared)$/.test(location.hash)) open();
+    else { navigate('#/documents'); setTimeout(open, 400); }
+  };
+  if (u.role === 'admin') {
+    return [
+      { icon: 'activity', label: 'Audit trail', onClick: go('#/admin/audit') },
+      { icon: 'users', label: 'People', onClick: go('#/admin/users') },
+      { icon: 'files', label: 'Documents', onClick: go('#/admin/documents') },
+      { icon: 'lock', label: 'Account security', onClick: go('#/account') },
+    ];
+  }
+  const actions = [];
+  if (u.role === 'owner') actions.push({ icon: 'upload', label: 'Upload document', onClick: () => uploadDialog().then((doc) => doc && navigate(`#/documents/${doc.id}`)) });
+  actions.push(
+    { icon: 'search', label: 'Search documents', onClick: focusSearch },
+    { icon: 'share', label: 'Shared with me', onClick: go('#/shared') },
+    { icon: 'lock', label: 'Account security', onClick: go('#/account') },
+  );
+  return actions;
 }
 
 // ── Sign-in / sign-up ────────────────────────────────────────────────────────
@@ -161,5 +190,6 @@ async function boot() {
   render();
 }
 
+installRipple();
 window.addEventListener('hashchange', render);
 boot();
