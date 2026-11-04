@@ -1,7 +1,7 @@
 // Administrator views: overview with alerts, audit trail, people, document metadata.
 import { h, icon, toast, modal, confirmDialog, avatar, fmtDateTime, fmtAgo, rolePill, outcomePill, actionLabel } from '../ui.js';
 import { get, post, patch } from '../api.js';
-import { navigate } from '../app.js';
+import { navigate, state } from '../app.js';
 
 function chainBanner(chain) {
   return chain.ok
@@ -100,18 +100,42 @@ export async function adminUsersPage() {
       h('div', { class: 'titles' }, h('h1', {}, 'People'), h('p', {}, 'Disabling someone ends their sessions and access immediately. Their grants stay on record.')),
       h('button', { class: 'btn primary', onclick: () => createUserDialog().then((ok) => ok && reload()) }, icon('plus'), 'Add person')),
     h('div', { class: 'card' }, h('div', { class: 'table-wrap' }, h('table', {},
-      h('thead', {}, h('tr', {}, h('th', {}, 'Person'), h('th', {}, 'Role'), h('th', {}, 'Owns'), h('th', {}, 'Live grants'), h('th', {}, 'Sessions'), h('th', {}, 'Status'), h('th', {}, ''))),
+      h('thead', {}, h('tr', {}, h('th', {}, 'Person'), h('th', {}, 'Role'), h('th', {}, 'Owns'), h('th', {}, 'Live grants'), h('th', {}, 'Sessions'), h('th', {}, '2FA'), h('th', {}, 'Status'), h('th', {}, ''))),
       h('tbody', {}, users.map((u) => h('tr', {},
         h('td', {}, h('div', { class: 'row' }, avatar(u.name, 'sm'), h('div', {}, h('b', {}, u.name), h('div', { class: 'small muted' }, `${u.email}${u.department ? ` · ${u.department}` : ''}`)))),
         h('td', {}, rolePill(u.role)),
         h('td', {}, String(u.owned_documents)),
         h('td', {}, String(u.live_grants)),
         h('td', {}, String(u.sessions)),
-        h('td', {}, u.is_active ? h('span', { class: 'pill ok' }, 'Active') : h('span', { class: 'pill denied' }, 'Disabled'), u.is_demo ? h('div', { class: 'small muted' }, 'demo, protected') : null),
-        h('td', {}, u.is_demo || u.role === 'admin' ? null : h('button', { class: `btn sm ${u.is_active ? 'danger' : ''}`, onclick: async () => {
-          if (u.is_active && !(await confirmDialog({ title: `Disable ${u.name}?`, text: 'All of their sessions end now and every request they make is refused. Documents they own stay in place; transfer them from the Documents page.', confirm: 'Disable', danger: true }))) return;
-          try { await patch(`/admin/users/${u.id}`, { isActive: !u.is_active }); toast(u.is_active ? `${u.name} disabled.` : `${u.name} enabled.`); reload(); } catch (e) { toast(e.message, 'error'); }
-        } }, u.is_active ? 'Disable' : 'Enable')))))))));
+        h('td', {}, u.mfa_enabled ? h('span', { class: 'pill ok' }, 'On') : h('span', { class: `pill ${u.role === 'admin' && !u.is_demo ? 'denied' : ''}` }, 'Off')),
+        h('td', {}, u.is_active ? h('span', { class: 'pill ok' }, 'Active') : h('span', { class: 'pill denied' }, 'Disabled'),
+          u.must_change_password ? h('div', { class: 'small muted' }, 'must set password') : null,
+          u.is_demo ? h('div', { class: 'small muted' }, 'demo, protected') : null),
+        h('td', {}, u.is_demo || u.id === state.user.id ? null : h('div', { class: 'row' },
+          h('button', { class: `btn sm ${u.is_active ? 'danger' : ''}`, onclick: async () => {
+            if (u.is_active && !(await confirmDialog({ title: `Disable ${u.name}?`, text: 'All of their sessions end now and every request they make is refused. Documents they own stay in place; transfer them from the Documents page.', confirm: 'Disable', danger: true }))) return;
+            try { await patch(`/admin/users/${u.id}`, { isActive: !u.is_active }); toast(u.is_active ? `${u.name} disabled.` : `${u.name} enabled.`); reload(); } catch (e) { toast(e.message, 'error'); }
+          } }, u.is_active ? 'Disable' : 'Enable'),
+          h('button', { class: 'btn sm', title: 'Set a temporary password', onclick: () => resetPasswordDialog(u).then((ok) => ok && reload()) }, 'Reset password'),
+          u.mfa_enabled ? h('button', { class: 'btn sm', title: 'For a lost phone', onclick: async () => {
+            if (!(await confirmDialog({ title: `Reset two-factor for ${u.name}?`, text: 'Use this only after confirming their identity another way (for example in person). Their sessions end and they set up a new authenticator at next sign-in.', confirm: 'Reset 2FA', danger: true }))) return;
+            try { await post(`/admin/users/${u.id}/reset-mfa`); toast('Two-factor reset.'); reload(); } catch (e) { toast(e.message, 'error'); }
+          } }, 'Reset 2FA') : null)))))))));
+}
+
+function resetPasswordDialog(u) {
+  const password = h('input', { class: 'input', type: 'text', autocomplete: 'off', minlength: '12' });
+  const error = h('div', { class: 'form-error hidden', role: 'alert' });
+  return modal((close) => ({
+    title: `Reset password for ${u.name}`,
+    subtitle: 'They must choose their own password at next sign-in. All their sessions end now.',
+    body: [error, h('label', { class: 'field' }, 'Temporary password (12+ characters)', password), h('div', { class: 'note' }, icon('info'), h('div', {}, 'Give it to them over a different channel from their email, e.g. in person or by phone.'))],
+    footer: [h('button', { class: 'btn', onclick: () => close(false) }, 'Cancel'),
+      h('button', { class: 'btn primary', onclick: async () => {
+        try { await post(`/admin/users/${u.id}/reset-password`, { password: password.value }); toast('Password reset.'); close(true); }
+        catch (e) { error.textContent = e.message; error.classList.remove('hidden'); }
+      } }, 'Reset password')],
+  }));
 }
 
 function createUserDialog() {
@@ -119,11 +143,11 @@ function createUserDialog() {
   const email = h('input', { class: 'input', type: 'email', maxlength: '254' });
   const department = h('input', { class: 'input', maxlength: '60' });
   const role = h('select', {}, h('option', { value: 'viewer' }, 'Viewer: can only open what is shared with them'), h('option', { value: 'owner' }, 'Owner: can upload and share their own documents'), h('option', { value: 'admin' }, 'Administrator: manages people and audit, no document access'));
-  const password = h('input', { class: 'input', type: 'password', minlength: '10', autocomplete: 'new-password' });
+  const password = h('input', { class: 'input', type: 'text', minlength: '12', autocomplete: 'off' });
   const error = h('div', { class: 'form-error hidden', role: 'alert' });
   return modal((close) => ({
     title: 'Add a person',
-    body: [error, h('label', { class: 'field' }, 'Full name', name), h('label', { class: 'field' }, 'Email', email), h('label', { class: 'field' }, 'Department', department), h('label', { class: 'field' }, 'Role', role), h('label', { class: 'field' }, 'Initial password (10+ characters)', password)],
+    body: [error, h('label', { class: 'field' }, 'Full name', name), h('label', { class: 'field' }, 'Email', email), h('label', { class: 'field' }, 'Department', department), h('label', { class: 'field' }, 'Role', role), h('label', { class: 'field' }, 'Initial password (12+ characters, they must change it at first sign-in)', password)],
     footer: [h('button', { class: 'btn', onclick: () => close(false) }, 'Cancel'),
       h('button', { class: 'btn primary', onclick: async () => {
         try {

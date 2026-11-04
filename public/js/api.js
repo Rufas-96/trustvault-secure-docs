@@ -14,6 +14,10 @@ export class ApiError extends Error {
 
 let onUnauthorized = () => {};
 export const setUnauthorizedHandler = (fn) => { onUnauthorized = fn; };
+// The server answers 403 + code PASSWORD_CHANGE_REQUIRED / MFA_SETUP_REQUIRED while the
+// account is gated; the app sends the user to the account page to fix it.
+let onGate = () => {};
+export const setGateHandler = (fn) => { onGate = fn; };
 
 export async function api(method, path, body) {
   const headers = {};
@@ -27,8 +31,11 @@ export async function api(method, path, body) {
   const res = await fetch(`/api${path}`, { method, headers, body: payload, credentials: 'same-origin' });
   const data = res.headers.get('content-type')?.includes('application/json') ? await res.json() : null;
   if (!res.ok) {
-    if (res.status === 401 && path !== '/auth/login' && path !== '/me') onUnauthorized();
-    throw new ApiError(res.status, data?.error || `Request failed (${res.status})`);
+    if (res.status === 401 && !path.startsWith('/auth/login') && path !== '/auth/mfa' && path !== '/me') onUnauthorized();
+    const err = new ApiError(res.status, data?.error || `Request failed (${res.status})`);
+    err.code = data?.details?.code;
+    if (res.status === 403 && err.code) onGate(err.code);
+    throw err;
   }
   return data;
 }

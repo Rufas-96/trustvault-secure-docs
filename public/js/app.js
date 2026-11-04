@@ -1,8 +1,9 @@
 // App entry: session bootstrap, hash router, sign-in page and the app shell.
 import { h, icon, avatar, rolePill, toast } from './ui.js';
-import { get, post, setCsrf, setUnauthorizedHandler } from './api.js';
+import { get, post, setCsrf, setGateHandler, setUnauthorizedHandler } from './api.js';
 import { documentsPage, documentDetailPage, trashPage } from './views/documents.js';
 import { adminOverviewPage, adminAuditPage, adminUsersPage, adminDocumentsPage } from './views/admin.js';
+import { accountPage } from './views/account.js';
 
 export const state = { user: null, config: null };
 const root = document.getElementById('app');
@@ -26,7 +27,18 @@ const routes = [
   { re: /^#\/admin\/audit$/, nav: 'audit', roles: ['admin'], render: () => adminAuditPage() },
   { re: /^#\/admin\/users$/, nav: 'users', roles: ['admin'], render: () => adminUsersPage() },
   { re: /^#\/admin\/documents$/, nav: 'admindocs', roles: ['admin'], render: () => adminDocumentsPage() },
+  { re: /^#\/account$/, nav: 'account', render: () => accountPage() },
 ];
+
+// A user who must change their password, or an admin without two-factor, can only reach
+// the account page. (The server enforces the same rule; this just avoids dead-end pages.)
+const isGated = (u) => u.mustChangePassword || (u.mfaRequired && !u.mfaEnabled);
+
+export async function refreshUser() {
+  const me = await get('/me');
+  state.user = me.user;
+  setCsrf(me.csrfToken);
+}
 
 const homeFor = (user) => (user.role === 'admin' ? '#/admin' : '#/documents');
 
@@ -37,6 +49,10 @@ export function navigate(hash) {
 
 async function render() {
   if (!state.user) return renderLogin();
+  if (isGated(state.user) && location.hash !== '#/account') {
+    location.replace('#/account');
+    return;
+  }
   const route = routes.find((r) => r.re.test(location.hash));
   if (!route || (route.roles && !route.roles.includes(state.user.role))) {
     location.replace(homeFor(state.user));
@@ -73,6 +89,9 @@ function renderShell(active, page) {
       link('admindocs', '#/admin/documents', 'files', 'Documents'),
       link('users', '#/admin/users', 'users', 'People')));
   }
+  sections.push(h('nav', { class: 'nav', 'aria-label': 'Account' },
+    h('div', { class: 'nav-label' }, 'Account'),
+    link('account', '#/account', 'lock', 'Account security')));
 
   const shell = h('div', { class: 'shell' });
   const closeNav = () => shell.classList.remove('nav-open');
@@ -108,11 +127,8 @@ function renderLogin() {
     submit.disabled = true;
     try {
       const r = await post('/auth/login', { email: email.value, password: password.value });
-      setCsrf(r.csrfToken);
-      state.user = r.user;
-      const next = sessionStorage.getItem('tv_after_login');
-      sessionStorage.removeItem('tv_after_login');
-      navigate(next && next !== '#/login' ? next : homeFor(r.user));
+      if (r.mfaRequired) return showMfaStep(r.mfaToken);
+      finishLogin(r);
     } catch (err) {
       error.textContent = err.message;
       error.classList.remove('hidden');
@@ -130,6 +146,56 @@ function renderLogin() {
       DEMO.map((d) => h('button', { type: 'button', class: 'demo-btn', onclick: () => { email.value = d.email; password.value = d.password; submit.focus(); } },
         avatar(d.name, 'sm'),
         h('div', { class: 'who' }, h('b', {}, `${d.name} · ${d.label}`), h('span', {}, d.email)), rolePill(d.role)))));
+
+  function finishLogin(r) {
+    setCsrf(r.csrfToken);
+    state.user = r.user;
+    const next = sessionStorage.getItem('tv_after_login');
+    sessionStorage.removeItem('tv_after_login');
+    navigate(next && next !== '#/login' ? next : homeFor(r.user));
+  }
+
+  // Step 2: password was right; now the one-time code (or a recovery code).
+  function showMfaStep(mfaToken) {
+    let useRecovery = false;
+    const code = h('input', { class: 'input mono code-input', inputmode: 'numeric', autocomplete: 'one-time-code', maxlength: '7', placeholder: '123 456', 'aria-label': 'Authentication code' });
+    const mfaError = h('div', { class: 'form-error hidden', role: 'alert' });
+    const label = h('span', {}, '6-digit code from your authenticator app');
+    const verify = h('button', { class: 'btn primary block', type: 'submit' }, 'Verify');
+    const toggle = h('button', { type: 'button', class: 'btn ghost sm', onclick: () => {
+      useRecovery = !useRecovery;
+      label.textContent = useRecovery ? 'Recovery code (e.g. 7KQ4-M2XD)' : '6-digit code from your authenticator app';
+      code.setAttribute('inputmode', useRecovery ? 'text' : 'numeric');
+      code.setAttribute('maxlength', useRecovery ? '9' : '7');
+      code.setAttribute('placeholder', useRecovery ? 'XXXX-XXXX' : '123 456');
+      toggle.textContent = useRecovery ? 'Use authenticator code instead' : 'Lost your phone? Use a recovery code';
+      code.value = '';
+      code.focus();
+    } }, 'Lost your phone? Use a recovery code');
+    const mfaForm = h('form', { class: 'login-form', onsubmit: async (e) => {
+      e.preventDefault();
+      mfaError.classList.add('hidden');
+      verify.disabled = true;
+      try {
+        const body = useRecovery ? { mfaToken, recoveryCode: code.value } : { mfaToken, code: code.value.replace(/\s/g, '') };
+        finishLogin(await post('/auth/mfa', body));
+      } catch (err) {
+        mfaError.textContent = err.message;
+        mfaError.classList.remove('hidden');
+        if (/again/.test(err.message)) setTimeout(() => renderLogin(), 1800);
+      } finally {
+        verify.disabled = false;
+      }
+    } },
+      h('div', { class: 'mfa-badge' }, icon('shield')),
+      h('div', {}, h('h2', {}, 'Two-factor sign-in'), h('p', { class: 'muted' }, 'Your password was correct. Enter the code to finish signing in.')),
+      mfaError,
+      h('label', { class: 'field' }, label, code),
+      verify,
+      h('div', { class: 'row wrap' }, toggle, h('button', { type: 'button', class: 'btn ghost sm', onclick: () => renderLogin() }, 'Start over')));
+    form.replaceWith(mfaForm);
+    code.focus();
+  }
 
   const pillar = (ic, title, text) => h('div', { class: 'pillar' }, h('div', { class: 'pi' }, icon(ic)), h('div', {}, h('b', {}, title), h('span', {}, text)));
   root.className = '';
@@ -157,6 +223,8 @@ async function signOut() {
   location.hash = '#/login';
   render();
 }
+
+setGateHandler(() => refreshUser().then(() => navigate('#/account')).catch(() => {}));
 
 setUnauthorizedHandler(() => {
   if (!state.user) return;
