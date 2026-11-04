@@ -69,6 +69,8 @@ export function createApp() {
   api.post('/auth/login', login);
   api.post('/auth/logout', requireAuth, logout);
   api.get('/me', requireAuth, (req, res) => res.json({ user: publicUser(req.user), csrfToken: req.csrfToken }));
+  // Same as /me, but 200 with user:null when signed out, so the page can boot without a 401.
+  api.get('/session', (req, res) => res.json(req.user ? { user: publicUser(req.user), csrfToken: req.csrfToken } : { user: null }));
 
   api.use('/documents', requireAuth, documentsRouter);
   api.use('/users', requireAuth, usersRouter);
