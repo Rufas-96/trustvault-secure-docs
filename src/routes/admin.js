@@ -20,6 +20,7 @@ adminRouter.get('/overview', async (req, res) => {
   const [counts] = await query(`
     SELECT
       (SELECT count(*)::int FROM users WHERE is_active) AS active_users,
+      (SELECT count(*)::int FROM users WHERE signup_source = 'self' AND created_at > now() - interval '24 hours') AS signups_24h,
       (SELECT count(*)::int FROM documents WHERE deleted_at IS NULL) AS documents,
       (SELECT count(*)::int FROM grants WHERE revoked_at IS NULL AND (expires_at IS NULL OR expires_at > now())) AS live_grants,
       (SELECT count(*)::int FROM audit_log WHERE action = 'document.download' AND outcome = 'ok' AND at > now() - interval '24 hours') AS downloads_24h,
@@ -138,7 +139,7 @@ adminRouter.post('/documents/:id/transfer', async (req, res) => {
 // ── Users ────────────────────────────────────────────────────────────────────
 adminRouter.get('/users', async (req, res) => {
   const rows = await query(`
-    SELECT u.id, u.email, u.name, u.role, u.department, u.is_active, u.is_demo, u.created_at, u.mfa_enabled, u.must_change_password,
+    SELECT u.id, u.email, u.name, u.role, u.department, u.is_active, u.is_demo, u.created_at, u.mfa_enabled, u.must_change_password, u.email_verified, u.phone_verified, u.sms_2fa, u.signup_source,
            (SELECT count(*)::int FROM documents d WHERE d.owner_id = u.id AND d.deleted_at IS NULL) AS owned_documents,
            (SELECT count(*)::int FROM grants g WHERE g.grantee_id = u.id AND g.revoked_at IS NULL) AS live_grants,
            (SELECT count(*)::int FROM sessions s WHERE s.user_id = u.id AND s.expires_at > now()) AS sessions

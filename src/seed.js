@@ -66,7 +66,7 @@ export async function seedIfEmpty({ log = console.log } = {}) {
     for (const u of DEMO_USERS) {
       ids[u.key] = randomUUID();
       await q(
-        `INSERT INTO users (id, email, name, role, department, password_hash, is_demo) VALUES ($1,$2,$3,$4,$5,$6,true)`,
+        `INSERT INTO users (id, email, name, role, department, password_hash, is_demo, signup_source) VALUES ($1,$2,$3,$4,$5,$6,true,'seed')`,
         [ids[u.key], u.email, u.name, u.role, u.department, await hashPassword(u.password)],
       );
       await appendAudit(q, { action: 'user.create', targetUserId: ids[u.key], ip: 'seed', details: { email: u.email, role: u.role, seeded: true } });

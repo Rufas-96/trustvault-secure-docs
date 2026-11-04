@@ -39,6 +39,40 @@ CREATE TABLE IF NOT EXISTS pending_logins (
   attempts    integer NOT NULL DEFAULT 0,
   ip          text
 );
+-- Which factor was already proven (password, email code, SMS code) and which one is still
+-- needed (totp, sms, password). The two are always different.
+ALTER TABLE pending_logins ADD COLUMN IF NOT EXISTS factor1 text NOT NULL DEFAULT 'password';
+ALTER TABLE pending_logins ADD COLUMN IF NOT EXISTS second text NOT NULL DEFAULT 'totp';
+ALTER TABLE pending_logins ADD COLUMN IF NOT EXISTS otp_ticket_hash text;
+
+-- Self sign-up, email/SMS one-time codes and phone numbers (added 2026-11-04).
+-- Existing and admin-created accounts count as verified; self sign-ups start unverified.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified boolean NOT NULL DEFAULT true;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS signup_source text NOT NULL DEFAULT 'admin';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS phone text;               -- E.164, e.g. +919876543210
+ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_verified boolean NOT NULL DEFAULT false;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS sms_2fa boolean NOT NULL DEFAULT false;
+-- A verified number belongs to one account only.
+CREATE UNIQUE INDEX IF NOT EXISTS users_verified_phone_idx ON users(phone) WHERE phone_verified;
+
+-- One-time codes sent by email or SMS. The code itself is never stored, only an HMAC of it.
+-- Each code is bound to a random ticket held by the browser that asked for it, so a code is
+-- useless without the ticket, and a ticket allows only a few guesses.
+CREATE TABLE IF NOT EXISTS otp_codes (
+  id           uuid PRIMARY KEY,
+  ticket_hash  text NOT NULL UNIQUE,
+  purpose      text NOT NULL CHECK (purpose IN ('signup', 'login_email', 'login_sms', 'second_sms', 'password_reset', 'phone_verify')),
+  channel      text NOT NULL CHECK (channel IN ('email', 'sms')),
+  destination  text NOT NULL,
+  user_id      uuid REFERENCES users(id) ON DELETE CASCADE,
+  code_hash    text NOT NULL,
+  attempts     integer NOT NULL DEFAULT 0,
+  expires_at   timestamptz NOT NULL,
+  consumed_at  timestamptz,
+  created_at   timestamptz NOT NULL DEFAULT now(),
+  ip           text
+);
+CREATE INDEX IF NOT EXISTS otp_destination_idx ON otp_codes(destination, created_at);
 
 -- Server-side sessions. The cookie holds a random token; only its SHA-256 is stored,
 -- so a leaked database row cannot be replayed as a cookie.
