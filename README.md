@@ -8,6 +8,12 @@ HMAC-chained audit trail.
 **Live:** https://trustvault-secure-docs.onrender.com
 (free hosting: the first request after ~15 idle minutes can take 30–50 s while the server wakes up)
 
+**Demo video (4 min):** https://youtu.be/Bta8kV3O_G8
+Recorded against the live site with a scripted browser (Puppeteer) so every step is
+reproducible; captions added, and my IP address and real email addresses masked. Everything
+shown is the real application: upload, share, split-screen revoke, refused access, audit
+trail, chain verification, account security, and the real test output.
+
 | Document | What it covers |
 |---|---|
 | [THREATS.md](THREATS.md) | How this could be attacked, what stops each attack, the test that proves it, and what I accepted |

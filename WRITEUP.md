@@ -19,7 +19,7 @@ away the moment an owner says so, and recorded in an audit trail that shows tamp
   sessions/CSRF, sign-in, two-factor and one-time codes. Each authorisation check was
   verified by deleting it and watching a test fail.
 
-Live: https://trustvault-secure-docs.onrender.com · details in [README.md](README.md).
+Live: https://trustvault-secure-docs.onrender.com · Demo video: https://youtu.be/Bta8kV3O_G8 · details in [README.md](README.md).
 
 ## The permission model, in my own words
 
