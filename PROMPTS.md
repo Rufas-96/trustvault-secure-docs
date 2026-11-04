@@ -45,3 +45,52 @@ session row). Commit: [0370ee4](../../commit/0370ee4).
 
 **Lesson I kept:** a passing suite proves nothing until you have seen it fail. Mutation
 checks are now part of my routine for every authorisation change.
+
+---
+
+## 2. 2026-11-04: An audit tamper test that never deleted anything (audit trail)
+
+**Asked:** "Add tests proving the audit trail cannot be quietly altered: UPDATE/DELETE/TRUNCATE
+are blocked, and the HMAC chain detects an edited row and a deleted row."
+
+**Produced:** The blocked-statements test and the edited-row test were real. But the "T-17
+deleting an audit row is detected" test only read six rows and asserted
+`rows[2].prev_hash === rows[1].hash`. It deleted nothing and never called `verifyChain()`.
+It also had a leftover `assert.ok(createHmac)` that tests nothing at all. The tool's own
+comment admitted why: the previous test had left the chain broken, so it "checked the
+mechanism on a copy of the rows" instead. That test would still pass if `verifyChain()`
+ignored `prev_hash` completely, which is exactly the check that catches a deleted row.
+
+**What was wrong underneath:** the edited-row test never repaired the row it tampered with,
+so every later test started from a broken chain. Instead of fixing the cause, the tool wrote
+a weaker test around it.
+
+**What I did instead:** each tamper test now disables the trigger, tampers, asserts
+`verifyChain()` reports the exact `brokenAt` entry and the right reason, then puts the
+original row back, re-enables the trigger, and asserts the chain is intact again. The
+deletion test really deletes a row and expects the break at the *next* row. I also added a
+test the tool had not thought of: an attacker with SQL access appends a forged row whose hash
+is a plain SHA-256, because the HMAC key is not in the database. `verifyChain()` must flag it.
+Commit: [44b2eb0](../../commit/44b2eb0).
+
+---
+
+## 3. 2026-11-04: Database TLS with certificate checking switched off (data in transit)
+
+**Asked:** "Write a DB adapter: node-postgres when DATABASE_URL is set, PGlite otherwise."
+
+**Produced:** A clean adapter, with this line for production:
+`ssl: ... : { rejectUnauthorized: false }`. That is the snippet most hosting tutorials paste.
+
+**What was wrong:** `rejectUnauthorized: false` encrypts the connection but never checks
+*who* is on the other end. Anyone who can sit in the network path between Render and the
+database can present any certificate, and the app will happily send every document's
+ciphertext, every audit row, and the session table to them. In a product whose whole point is
+"the wrong person cannot reach the file", that is a hole below the application layer, and
+every authorisation check above it would be irrelevant.
+
+**What I did instead:** certificates are verified (`rejectUnauthorized: true`). Neon serves a
+publicly trusted certificate, so nothing else is needed. Local development without TLS has to
+say so explicitly with `sslmode=disable`. I found it while preparing the deployment config,
+reading the adapter line by line before pointing it at a real database.
+Commit: [2497d81](../../commit/2497d81).
