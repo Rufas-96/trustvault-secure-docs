@@ -50,8 +50,12 @@ function apiRateLimit({ windowMs = 60_000, max = 300 } = {}) {
 export function createApp() {
   const app = express();
   app.disable('x-powered-by');
-  // Render/Vercel put one proxy in front of us; trust exactly that one for req.ip.
-  app.set('trust proxy', config.isProduction ? 1 : false);
+  // req.ip feeds the audit trail, so it must be the real client and must not be spoofable.
+  // Render forwards through more than one internal hop (10.x addresses), so trusting a fixed
+  // count of 1 recorded Render's own load balancer for every request. Instead, skip only
+  // proxies on private networks: a client-supplied X-Forwarded-For entry is never trusted,
+  // because it sits to the left of the first public address. Override with TRUST_PROXY.
+  app.set('trust proxy', config.trustProxy);
   app.use(securityHeaders);
 
   app.get('/healthz', (req, res) => res.json({ ok: true }));

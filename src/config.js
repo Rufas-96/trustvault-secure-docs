@@ -52,4 +52,5 @@ export const config = {
   sessionMaxHours: 8,
   maxUploadBytes: 10 * 1024 * 1024,
   seedOnBoot: process.env.SEED_ON_BOOT !== 'false',
+  trustProxy: process.env.TRUST_PROXY ?? (isProduction ? 'loopback, linklocal, uniquelocal' : false),
 };
